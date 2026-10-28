@@ -1,7 +1,46 @@
+# Python
 __pycache__/
 *.py[cod]
-captures/
-*.cs8
-*.C16
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .venv/
 venv/
+.DS_Store
+
+# Runtime captures / IQ / audio / DBs
+captures/
+addons/offensive-lab/captures/
+*.cs8
+*.c8
+*.C16
+*.c16
+*.wav
+*.db
+*.sqlite
+*.sqlite3
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Tooling caches / large blobs / vendored binaries
+tools/ais-catcher/
+tools/bin/
+tools/libs/
+tools/*.deb
+*.deb
+firmware-cache/
+*.egg-info/
+src/*.egg-info/
+
+# Editor / agent local
+.cursor/
+.idea/
+*.swp
+*~
