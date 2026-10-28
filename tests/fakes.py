@@ -176,8 +176,19 @@ class FakeSubprocessPool:
 
     def install(self, monkeypatch: Any) -> None:
         import asyncio as aio
+        import os as _os
 
         self._real_exec = aio.create_subprocess_exec
+
+        def _fake_killpg(pid: int, sig: int) -> None:
+            """Route process-group signals to FakeProcess — never touch real PIDs."""
+            for proc in self.processes:
+                if proc.pid == pid:
+                    proc.send_signal(sig)
+                    return
+            raise ProcessLookupError(f"fake killpg: no process {pid}")
+
+        monkeypatch.setattr(_os, "killpg", _fake_killpg)
 
         async def _fake_exec(*argv: str, **kwargs: Any) -> FakeProcess:
             args = [str(a) for a in argv]

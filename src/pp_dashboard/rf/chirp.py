@@ -71,8 +71,9 @@ def estimate_rms_dbfs(cs8_path: Path) -> float:
         raw = raw[:-1]
     i = raw[0::2].astype(np.float64)
     q = raw[1::2].astype(np.float64)
-    power = np.mean(i * i + q * q)
+    power = float(np.mean(i * i + q * q))
     full_scale = 127.0 * 127.0
     if power <= 0:
         return float("-inf")
+    power = max(power, 1e-20)
     return float(10.0 * np.log10(power / full_scale))

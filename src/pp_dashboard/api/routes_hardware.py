@@ -73,7 +73,7 @@ async def start_replay(
     arbiter: HardwareArbiter = Depends(arbiter_dep),
 ) -> HardwareStatusResponse:
     try:
-        assert_tx_allowed(require_loop_ok=body.loop)
+        assert_tx_allowed(require_loop_ok=body.loop, amp=body.amp)
     except TxGateError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     return await _start(arbiter.start_replay(body))
@@ -85,7 +85,7 @@ async def start_continuous_tx(
     arbiter: HardwareArbiter = Depends(arbiter_dep),
 ) -> HardwareStatusResponse:
     try:
-        assert_tx_allowed()
+        assert_tx_allowed(amp=body.amp)
     except TxGateError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     return await _start(arbiter.start_continuous_tx(body))

@@ -56,21 +56,41 @@ def _which(*names: str) -> str:
     raise FileNotFoundError(f"None of {names} found on PATH")
 
 
-def pocsag_pipeline_cmd(frequency_hz: int) -> str:
+def pocsag_pipeline_argv(frequency_hz: int) -> tuple[list[str], list[str]]:
+    """Return (rtl_fm argv, multimon-ng argv) — no shell."""
     rtl_fm = shutil.which("rx_fm") or shutil.which("rtl_fm")
     multimon = shutil.which("multimon-ng")
     if not rtl_fm or not multimon:
         raise FileNotFoundError(
             "POCSAG needs rtl_fm (or rx_fm) and multimon-ng installed"
         )
-    return (
-        f"{rtl_fm} -f {frequency_hz} -M fm -s 22050 -g 40 - "
-        f"| {multimon} -a POCSAG512 -a POCSAG1200 -a POCSAG2400 -a FLEX -t raw -"
-    )
+    producer = [rtl_fm, "-f", str(int(frequency_hz)), "-M", "fm", "-s", "22050", "-g", "40", "-"]
+    consumer = [
+        multimon,
+        "-a",
+        "POCSAG512",
+        "-a",
+        "POCSAG1200",
+        "-a",
+        "POCSAG2400",
+        "-a",
+        "FLEX",
+        "-t",
+        "raw",
+        "-",
+    ]
+    return producer, consumer
 
 
-def adsb_pipeline_cmd(*, frequency_hz: int, lna: int = 40, vga: int = 20) -> str:
-    """HackRF IQ → readsb/dump1090 Mode-S decoder with SBS on localhost:30003."""
+def pocsag_pipeline_cmd(frequency_hz: int) -> str:
+    producer, consumer = pocsag_pipeline_argv(frequency_hz)
+    return f"{' '.join(producer)} | {' '.join(consumer)}"
+
+
+def adsb_pipeline_argv(
+    *, frequency_hz: int, lna: int = 40, vga: int = 20
+) -> tuple[list[str], list[str]]:
+    """HackRF IQ → readsb/dump1090 Mode-S decoder argv pair (no shell)."""
     hackrf = shutil.which("hackrf_transfer")
     if not hackrf:
         raise FileNotFoundError("hackrf_transfer not found on PATH")
@@ -84,49 +104,71 @@ def adsb_pipeline_cmd(*, frequency_hz: int, lna: int = 40, vga: int = 20) -> str
             "ADS-B needs readsb or dump1090 on PATH "
             "(apt: readsb). HackRF pipe: hackrf_transfer | readsb --ifile -"
         )
-    # Signed interleaved 8-bit IQ at 2 MSPS is the stable HackRF ADS-B rate.
-    rx = (
-        f"stdbuf -oL {hackrf} -r - -f {int(frequency_hz)} -s 2000000 "
-        f"-l {int(lna)} -g {int(vga)} -a 0"
-    )
+    producer = [
+        hackrf,
+        "-r",
+        "-",
+        "-f",
+        str(int(frequency_hz)),
+        "-s",
+        "2000000",
+        "-l",
+        str(int(lna)),
+        "-g",
+        str(int(vga)),
+        "-a",
+        "0",
+    ]
     name = decoder.rsplit("/", 1)[-1]
     if name.startswith("readsb"):
-        dec = (
-            f"{decoder} --ifile - --iformat CS8 --quiet "
-            f"--net --net-sbs-port {DEFAULT_ADS_B_SBS_PORT}"
-        )
+        consumer = [
+            decoder,
+            "--ifile",
+            "-",
+            "--iformat",
+            "CS8",
+            "--quiet",
+            "--net",
+            "--net-sbs-port",
+            str(DEFAULT_ADS_B_SBS_PORT),
+        ]
     else:
-        # dump1090 family: prefer cs8 ifile; --net enables SBS :30003
-        dec = f"{decoder} --ifile - --iformat cs8 --net --quiet"
-    return f"{rx} 2>/dev/null | {dec}"
+        consumer = [decoder, "--ifile", "-", "--iformat", "cs8", "--net", "--quiet"]
+    return producer, consumer
 
 
-def ais_pipeline_cmd(*, frequency_hz: int, network_feed: bool = False) -> str:
+def adsb_pipeline_cmd(*, frequency_hz: int, lna: int = 40, vga: int = 20) -> str:
+    producer, consumer = adsb_pipeline_argv(
+        frequency_hz=frequency_hz, lna=lna, vga=vga
+    )
+    return f"{' '.join(producer)} | {' '.join(consumer)}"
+
+
+def ais_pipeline_argv(*, frequency_hz: int, network_feed: bool = False) -> list[str]:
     """Prefer AIS-catcher on HackRF; optional community network feed; else rtl_ais."""
+    _ = frequency_hz
     try:
         catcher = _which("AIS-catcher", "ais-catcher")
     except FileNotFoundError:
         catcher = None
     if catcher:
-        # NMEA-only on stdout for the map parser. HackRF index 0 when present.
-        # -X = aiscatcher.org community feed (boats without local RF).
         if network_feed:
-            return f"{catcher} -X -o 1 -q"
-        # LNA/VGA within HackRF Pro legal steps; PREAMP off (SCOPE amp lock).
-        return (
-            f"{catcher} -d 0 -o 1 -q "
-            f"-gf LNA 24 VGA 20 PREAMP off"
-        )
+            return [catcher, "-X", "-o", "1", "-q"]
+        return [catcher, "-d", "0", "-o", "1", "-q", "-gf", "LNA", "24", "VGA", "20", "PREAMP", "off"]
     rtl_ais = shutil.which("rtl_ais")
     if rtl_ais:
-        return f"{rtl_ais} -n"
+        return [rtl_ais, "-n"]
     ais = shutil.which("aisdecoder")
     if ais:
-        return f"{ais}"
+        return [ais]
     raise FileNotFoundError(
         "AIS needs AIS-catcher (HackRF) or rtl_ais (RTL-SDR) on PATH "
         f"(wanted ~{frequency_hz} Hz). Bundled binary: tools/bin/AIS-catcher"
     )
+
+
+def ais_pipeline_cmd(*, frequency_hz: int, network_feed: bool = False) -> str:
+    return " ".join(ais_pipeline_argv(frequency_hz=frequency_hz, network_feed=network_feed))
 
 
 @dataclass
@@ -136,6 +178,7 @@ class DecoderSession:
     frequency_hz: int
     handlers: list[LineHandler] = field(default_factory=list)
     _proc: asyncio.subprocess.Process | None = None
+    _producer: asyncio.subprocess.Process | None = None
     _tasks: list[asyncio.Task[None]] = field(default_factory=list)
     _sbs_reader: asyncio.StreamReader | None = None
     _sbs_writer: asyncio.StreamWriter | None = None
@@ -173,19 +216,45 @@ class DecoderSession:
                 raise RuntimeError("SDR subprocess already running")
 
             if self.kind == "pocsag":
+                producer_argv, consumer_argv = pocsag_pipeline_argv(self.frequency_hz)
                 cmd = pocsag_pipeline_cmd(self.frequency_hz)
             elif self.kind == "adsb":
+                producer_argv, consumer_argv = adsb_pipeline_argv(
+                    frequency_hz=self.frequency_hz or ADS_B_HZ
+                )
                 cmd = adsb_pipeline_cmd(frequency_hz=self.frequency_hz or ADS_B_HZ)
             else:
+                producer_argv = None
+                consumer_argv = ais_pipeline_argv(
+                    frequency_hz=self.frequency_hz or AIS_A_HZ
+                )
                 cmd = ais_pipeline_cmd(frequency_hz=self.frequency_hz or AIS_A_HZ)
 
             log.info("Starting %s: %s", self.kind, cmd)
-            self._proc = await asyncio.create_subprocess_shell(
-                cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                start_new_session=True,
-            )
+            if producer_argv is None:
+                self._producer = None
+                self._proc = await asyncio.create_subprocess_exec(
+                    *consumer_argv,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    start_new_session=True,
+                )
+            else:
+                self._producer = await asyncio.create_subprocess_exec(
+                    *producer_argv,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                assert self._producer.stdout is not None
+                self._proc = await asyncio.create_subprocess_exec(
+                    *consumer_argv,
+                    stdin=self._producer.stdout,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    start_new_session=True,
+                )
+                self._producer.stdout.close()
             self.cmd_desc = cmd
             self.arbiter.state = HardwareState.BUSY_RX
 
@@ -200,6 +269,22 @@ class DecoderSession:
             self._tasks.append(asyncio.create_task(self._sbs_client_loop()))
         return self.cmd_desc
 
+    async def _signal_proc(
+        self, proc: asyncio.subprocess.Process | None, sig: signal.Signals
+    ) -> None:
+        if proc is None or proc.returncode is not None:
+            return
+        try:
+            os.killpg(proc.pid, sig)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                if sig is signal.SIGINT:
+                    proc.send_signal(signal.SIGINT)
+                else:
+                    proc.kill()
+            except ProcessLookupError:
+                pass
+
     async def stop(self) -> None:
         self.running = False
         if self._sbs_writer is not None:
@@ -211,28 +296,19 @@ class DecoderSession:
             self._sbs_writer = None
             self._sbs_reader = None
         proc = self._proc
+        producer = self._producer
         self._proc = None
-        if proc and proc.returncode is None:
+        self._producer = None
+        await self._signal_proc(producer, signal.SIGINT)
+        await self._signal_proc(proc, signal.SIGINT)
+        for p in (proc, producer):
+            if p is None or p.returncode is not None:
+                continue
             try:
-                # Kill the whole pipeline process group (hackrf_transfer | decoder).
-                import os
-
-                os.killpg(proc.pid, signal.SIGINT)
-            except (ProcessLookupError, PermissionError, OSError):
-                try:
-                    proc.send_signal(signal.SIGINT)
-                except ProcessLookupError:
-                    pass
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=2.0)
+                await asyncio.wait_for(p.wait(), timeout=2.0)
             except TimeoutError:
-                try:
-                    import os
-
-                    os.killpg(proc.pid, signal.SIGKILL)
-                except (ProcessLookupError, PermissionError, OSError):
-                    proc.kill()
-                await proc.wait()
+                await self._signal_proc(p, signal.SIGKILL)
+                await p.wait()
         for t in self._tasks:
             t.cancel()
         if self._tasks:
@@ -246,6 +322,13 @@ class DecoderSession:
         assert self._proc
         await self._proc.wait()
         self.running = False
+        producer = self._producer
+        if producer is not None and producer.returncode is None:
+            await self._signal_proc(producer, signal.SIGKILL)
+            try:
+                await producer.wait()
+            except Exception:
+                pass
 
     async def _sbs_client_loop(self) -> None:
         """Attach to dump1090/readsb SBS port once it comes up."""

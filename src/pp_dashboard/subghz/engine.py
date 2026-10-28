@@ -215,6 +215,16 @@ class SubGhzEngine:
             keys = keys_in_window(self._last_synth.timeline, center, window)
         status = await self.arbiter.stop_subprocess(reason="bruteforce_stop")
         self._tx_started_monotonic = None
+        # Bound /dev/shm usage — unlink synth waveform after TX stops.
+        if self._last_synth is not None:
+            try:
+                path = self._last_synth.path
+                if path.is_file() and str(path.resolve()).startswith(
+                    str(Path("/dev/shm").resolve())
+                ):
+                    path.unlink(missing_ok=True)
+            except OSError:
+                log.warning("failed to unlink shm synth %s", self._last_synth.path)
         return {
             "status": status.model_dump(mode="json"),
             "candidate_keys": keys,

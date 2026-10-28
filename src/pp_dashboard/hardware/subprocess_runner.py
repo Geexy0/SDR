@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
@@ -160,23 +161,28 @@ class SubprocessRunner:
                     )
                 )
                 try:
-                    proc.send_signal(signal.SIGINT)
-                except ProcessLookupError:
-                    pass
-                else:
+                    os.killpg(proc.pid, signal.SIGINT)
+                except (ProcessLookupError, PermissionError, OSError):
                     try:
-                        await asyncio.wait_for(proc.wait(), timeout=self._cfg.sigkill_grace_s)
-                    except TimeoutError:
-                        log.warning(
-                            "SIGINT grace %.1fs elapsed; sending SIGKILL to pid=%s",
-                            self._cfg.sigkill_grace_s,
-                            proc.pid,
-                        )
+                        proc.send_signal(signal.SIGINT)
+                    except ProcessLookupError:
+                        pass
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=self._cfg.sigkill_grace_s)
+                except TimeoutError:
+                    log.warning(
+                        "SIGINT grace %.1fs elapsed; SIGKILL process group pid=%s",
+                        self._cfg.sigkill_grace_s,
+                        proc.pid,
+                    )
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError, OSError):
                         try:
                             proc.kill()
                         except ProcessLookupError:
                             pass
-                        await proc.wait()
+                    await proc.wait()
 
             if self._wait_task is not None:
                 await asyncio.gather(self._wait_task, return_exceptions=True)

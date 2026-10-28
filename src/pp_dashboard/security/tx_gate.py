@@ -24,26 +24,38 @@ class TxGateError(PermissionError):
     pass
 
 
-def _status_from(path: Path) -> str | None:
+def _read_gate_file(path: Path) -> str:
+    """Fail-closed read: missing, unreadable, or symlink escaping the repo → deny TX."""
+    if path.is_symlink():
+        try:
+            target = path.resolve(strict=True)
+        except OSError as exc:
+            raise TxGateError(f"TX denied: {path.name} symlink is broken") from exc
+        try:
+            target.relative_to(REPO_ROOT.resolve())
+        except ValueError as exc:
+            raise TxGateError(
+                f"TX denied: {path.name} symlink escapes repository"
+            ) from exc
     if not path.is_file():
-        return None
-    text = path.read_text(encoding="utf-8", errors="replace")
+        raise TxGateError(f"TX denied: {path.name} missing or unreadable")
+    try:
+        return path.read_text(encoding="utf-8", errors="strict")
+    except OSError as exc:
+        raise TxGateError(f"TX denied: cannot read {path.name}") from exc
+
+
+def _status_from_text(text: str) -> str | None:
     match = _STATUS_RE.search(text)
     return match.group("status").strip() if match else None
 
 
-def _engagement_from_confirm(path: Path) -> str | None:
-    if not path.is_file():
-        return None
-    text = path.read_text(encoding="utf-8", errors="replace")
+def _engagement_from_confirm_text(text: str) -> str | None:
     match = _ENGAGEMENT_RE.search(text)
     return match.group("name").strip() if match else None
 
 
-def _engagement_from_scope(path: Path) -> str | None:
-    if not path.is_file():
-        return None
-    text = path.read_text(encoding="utf-8", errors="replace")
+def _engagement_from_scope_text(text: str) -> str | None:
     for line in text.splitlines():
         if "Engagement name:" in line or "**Engagement name:**" in line:
             tick = re.search(r"`([^`]+)`", line)
@@ -52,10 +64,7 @@ def _engagement_from_scope(path: Path) -> str | None:
     return None
 
 
-def _window_from(path: Path) -> tuple[date, date] | None:
-    if not path.is_file():
-        return None
-    text = path.read_text(encoding="utf-8", errors="replace")
+def _window_from_text(text: str) -> tuple[date, date] | None:
     match = _WINDOW_RE.search(text)
     if not match:
         return None
@@ -71,22 +80,29 @@ def assert_tx_allowed(
     amp: int = 0,
     today: date | None = None,
 ) -> None:
-    """Raise TxGateError unless SCOPE is ACTIVE and CONFIRM is CONFIRMED for same engagement."""
-    _ = require_loop_ok  # continuous loop still requires gate; hard jam forbidden by SCOPE text
-    scope_status = _status_from(SCOPE_PATH)
-    confirm_status = _status_from(CONFIRM_PATH)
+    """Raise TxGateError unless SCOPE is ACTIVE and CONFIRM is CONFIRMED for same engagement.
+
+    Re-reads SCOPE.md and CONFIRM.md on every call (fail-closed snapshot).
+    ``require_loop_ok`` documents continuous/loop TX; the same gate still applies.
+    """
+    _ = require_loop_ok
+    scope_text = _read_gate_file(SCOPE_PATH)
+    confirm_text = _read_gate_file(CONFIRM_PATH)
+
+    scope_status = _status_from_text(scope_text)
+    confirm_status = _status_from_text(confirm_text)
     if scope_status != "ACTIVE":
         raise TxGateError("TX denied: SCOPE.md is not ACTIVE")
     if confirm_status != "CONFIRMED":
         raise TxGateError("TX denied: CONFIRM.md is not CONFIRMED")
-    scope_eng = _engagement_from_scope(SCOPE_PATH)
-    confirm_eng = _engagement_from_confirm(CONFIRM_PATH)
+    scope_eng = _engagement_from_scope_text(scope_text)
+    confirm_eng = _engagement_from_confirm_text(confirm_text)
     if not scope_eng or not confirm_eng or scope_eng != confirm_eng:
         raise TxGateError(
             f"TX denied: engagement mismatch scope={scope_eng!r} confirm={confirm_eng!r}"
         )
 
-    window = _window_from(SCOPE_PATH) or _window_from(CONFIRM_PATH)
+    window = _window_from_text(scope_text) or _window_from_text(confirm_text)
     if window is not None:
         start, end = window
         day = today or date.today()
@@ -106,7 +122,12 @@ def assert_tx_allowed(
 
 
 def force_amp_off(amp: int) -> int:
-    """Policy helper — always return 0 for lab TX."""
+    """Policy helper — always return 0 for lab TX; reject non-zero."""
     if int(amp) != 0:
         raise TxGateError("TX denied: AMP must be off (-a 0) under PP-LAB-RF-2026")
     return 0
+
+
+def tx_argv_amp(amp: int) -> str:
+    """Hard-force ``-a 0`` for every TX argv assembly site."""
+    return str(force_amp_off(amp))

@@ -52,7 +52,10 @@ class SweepBinaryParser:
 def powers_to_uint8(powers: np.ndarray, db_min: float = -110.0, db_max: float = -20.0) -> bytes:
     """Compress dB floats to Uint8 for websocket bandwidth."""
     span = max(db_max - db_min, 1.0)
-    scaled = (powers.astype(np.float32) - db_min) * (255.0 / span)
+    clean = np.nan_to_num(
+        powers.astype(np.float32), nan=db_min, posinf=db_max, neginf=db_min
+    )
+    scaled = (clean - db_min) * (255.0 / span)
     return np.clip(np.rint(scaled), 0, 255).astype(np.uint8).tobytes()
 
 

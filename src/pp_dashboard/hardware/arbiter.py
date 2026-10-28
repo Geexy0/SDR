@@ -316,6 +316,9 @@ class HardwareArbiter:
         )
 
     async def start_replay(self, req: ReplayRequest) -> HardwareStatusResponse:
+        from pp_dashboard.security.tx_gate import tx_argv_amp
+
+        amp_s = tx_argv_amp(req.amp)
         argv = [
             "hackrf_transfer",
             "-t",
@@ -327,17 +330,23 @@ class HardwareArbiter:
             "-x",
             str(req.tx_vga),
             "-a",
-            str(req.amp),
+            amp_s,
         ]
         if req.loop:
             argv.append("-R")
+        max_dur = req.max_duration_sec
+        if req.loop and max_dur is None:
+            max_dur = 60.0
         return await self._start_sdr(
             argv,
             busy=HardwareState.BUSY_TX,
-            max_duration_sec=req.max_duration_sec,
+            max_duration_sec=max_dur,
         )
 
     async def start_continuous_tx(self, req: ContinuousTxRequest) -> HardwareStatusResponse:
+        from pp_dashboard.security.tx_gate import tx_argv_amp
+
+        amp_s = tx_argv_amp(req.amp)
         argv = [
             "hackrf_transfer",
             "-c",
@@ -349,7 +358,7 @@ class HardwareArbiter:
             "-x",
             str(req.tx_vga),
             "-a",
-            str(req.amp),
+            amp_s,
         ]
         return await self._start_sdr(
             argv,
@@ -369,6 +378,9 @@ class HardwareArbiter:
         max_duration_sec: float | None = None,
     ) -> HardwareStatusResponse:
         """Transmit a precomputed IQ file (used by chirp barrage)."""
+        from pp_dashboard.security.tx_gate import tx_argv_amp
+
+        amp_s = tx_argv_amp(amp)
         argv = [
             "hackrf_transfer",
             "-t",
@@ -380,14 +392,17 @@ class HardwareArbiter:
             "-x",
             str(tx_vga),
             "-a",
-            str(amp),
+            amp_s,
         ]
         if loop:
             argv.append("-R")
+        max_dur = max_duration_sec
+        if loop and max_dur is None:
+            max_dur = 60.0
         return await self._start_sdr(
             argv,
             busy=HardwareState.BUSY_TX,
-            max_duration_sec=max_duration_sec,
+            max_duration_sec=max_dur,
         )
 
     async def start_sweep(self, req: SweepRequest) -> HardwareStatusResponse:
@@ -526,8 +541,37 @@ class HardwareArbiter:
         await self._emit_status(f"multiplex_rx_stopped:{reason}")
         return self.status()
 
+    async def _stop_sidecar_sessions(self, *, reason: str) -> None:
+        """Stop recon/TPMS owners outside the arbiter mutex (avoids lock deadlock)."""
+        try:
+            from pp_dashboard.recon.engine import ReconEngine
+
+            eng = ReconEngine._instance  # noqa: SLF001
+            if eng is not None:
+                if eng.waterfall is not None and eng.waterfall.running:
+                    await eng.waterfall.stop(reason=reason)
+                if eng.decoder is not None and eng.decoder.running:
+                    await eng.decoder.stop()
+                if eng.voice_recon is not None and eng.voice_recon.running:
+                    await eng.voice_recon.stop()
+                hybrid = getattr(eng, "hybrid_adsb", None)
+                if hybrid is not None and getattr(hybrid, "running", False):
+                    await hybrid.stop()
+        except Exception:
+            log.exception("sidecar recon stop failed (%s)", reason)
+        try:
+            from pp_dashboard.tpms.engine import TpmsEngine
+
+            tpms = TpmsEngine._instance  # noqa: SLF001
+            if tpms is not None and getattr(tpms, "running", False):
+                await tpms.stop()
+        except Exception:
+            log.exception("sidecar tpms stop failed (%s)", reason)
+
     async def stop_subprocess(self, *, reason: str = "api_stop") -> HardwareStatusResponse:
+        # Sidecar teardown first, outside the mutex — sidecars may need the lock.
         await self.cancel_watchdog()
+        await self._stop_sidecar_sessions(reason=reason)
         mux = self.multiplexer
         if mux is not None and getattr(mux, "running", False):
             await mux.stop(reason=reason)

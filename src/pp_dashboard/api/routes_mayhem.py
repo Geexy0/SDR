@@ -6,7 +6,11 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from pp_dashboard.mayhem.apps import FEATURED_APPS, resolve_featured_short_name
+from pp_dashboard.mayhem.apps import (
+    FEATURED_APPS,
+    is_tx_capable_app,
+    resolve_featured_short_name,
+)
 from pp_dashboard.mayhem.bridge import (
     BUTTON_MAP,
     MayhemBridgeError,
@@ -25,6 +29,7 @@ from pp_dashboard.models.mayhem import (
     MayhemInputRequest,
     MayhemInputResponse,
 )
+from pp_dashboard.security.tx_gate import TxGateError, assert_tx_allowed
 
 log = logging.getLogger(__name__)
 
@@ -123,11 +128,18 @@ async def start_app(
     bridge: MayhemSerialBridge = Depends(bridge_dep),
 ) -> MayhemAppStartResponse:
     try:
+        # Gate TX apps before touching serial so CONFIRM lock works offline.
+        if is_tx_capable_app(body.app_id):
+            assert_tx_allowed()
         apps = await bridge.applist()
         shorts = {a.short_name.lower() for a in apps}
         resolved = resolve_featured_short_name(body.app_id, shorts)
+        if is_tx_capable_app(resolved) and not is_tx_capable_app(body.app_id):
+            assert_tx_allowed()
         resp = await bridge.appstart(resolved)
         return MayhemAppStartResponse(app_id=body.app_id, resolved_id=resolved, response=resp)
+    except TxGateError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except MayhemBridgeError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ValueError as exc:

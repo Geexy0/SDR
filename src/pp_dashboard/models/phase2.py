@@ -89,8 +89,15 @@ class JammerRequest(DurationMixin):
     def validate_chirp(self) -> JammerRequest:
         if self.mode is JammerMode.CHIRP_BARRAGE and self.bandwidth_hz > self.sample_rate:
             raise ValueError("bandwidth_hz cannot exceed sample_rate")
-        if self.chirp_path != SHM_CHIRP_PATH and not str(self.chirp_path).startswith("/dev/shm/"):
-            raise ValueError("chirp_path must be under /dev/shm/")
+        if self.chirp_path != SHM_CHIRP_PATH:
+            from pp_dashboard.security.paths import resolve_under_any
+
+            try:
+                object.__setattr__(
+                    self, "chirp_path", resolve_under_any([Path("/dev/shm")], self.chirp_path)
+                )
+            except ValueError as exc:
+                raise ValueError("chirp_path must be under /dev/shm/") from exc
         return self
 
 

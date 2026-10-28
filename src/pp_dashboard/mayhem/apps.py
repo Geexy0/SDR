@@ -30,6 +30,42 @@ FEATURED_APPS: tuple[FeaturedApp, ...] = (
 )
 
 
+# Firmware short names known to emit RF (Mayhem Transmit lane).
+_TX_APP_NAMES = frozenset(
+    {
+        "jammer",
+        "bletx",
+        "blespam",
+        "ble_tx",
+        "replay",
+        "pocsag_tx",
+        "ook",
+        "ooktx",
+        "afsk_tx",
+        "morse",
+        "epirb_tx",
+    }
+)
+
+
+def featured_category(name: str) -> str | None:
+    """Return FEATURED_APPS category for ``name`` / alias, else None."""
+    needle = name.strip().lower()
+    for feat in FEATURED_APPS:
+        aliases = {feat.short_name.lower(), *(a.lower() for a in feat.aliases)}
+        if needle in aliases:
+            return feat.category
+    return None
+
+
+def is_tx_capable_app(name: str) -> bool:
+    """True if appstart would enter a Transmit / RF-emit Mayhem app."""
+    needle = name.strip().lower()
+    if featured_category(needle) == "Transmit":
+        return True
+    return needle in _TX_APP_NAMES
+
+
 def resolve_featured_short_name(name: str, applist_shorts: set[str]) -> str:
     """Map a featured / alias name onto a short name present in ``applist``."""
     needle = name.strip().lower()

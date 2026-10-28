@@ -82,9 +82,12 @@ class BruteforceRequest(BaseModel):
     @field_validator("out_path")
     @classmethod
     def shm_only(cls, v: Path) -> Path:
-        if not str(v).startswith("/dev/shm/"):
-            raise ValueError("bruteforce output must be under /dev/shm/")
-        return v
+        from pp_dashboard.security.paths import resolve_under_any
+
+        try:
+            return resolve_under_any([Path("/dev/shm")], v)
+        except ValueError as exc:
+            raise ValueError("bruteforce output must be under /dev/shm/") from exc
 
 
 class SubConvertRequest(BaseModel):

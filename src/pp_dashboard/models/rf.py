@@ -11,32 +11,18 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from pp_dashboard.config import settings
 from pp_dashboard.hardware.state import HardwareState
+from pp_dashboard.security.paths import resolve_safe_path, resolve_under_any
 
 
 def _ensure_under_captures(path: Path) -> Path:
-    captures = settings.captures_dir.resolve()
-    captures.mkdir(parents=True, exist_ok=True)
-    resolved = path.expanduser().resolve()
-    try:
-        resolved.relative_to(captures)
-    except ValueError as exc:
-        raise ValueError(f"filepath must be under {captures}") from exc
-    return resolved
+    return resolve_safe_path(settings.captures_dir, path)
 
 
 def _ensure_tx_iq_path(path: Path) -> Path:
     """Allow TX IQ from captures/ or /dev/shm (chirp RAM buffers)."""
-    resolved = path.expanduser().resolve()
-    captures = settings.captures_dir.resolve()
+    captures = settings.captures_dir
     captures.mkdir(parents=True, exist_ok=True)
-    shm = Path("/dev/shm").resolve()
-    for root in (captures, shm):
-        try:
-            resolved.relative_to(root)
-            return resolved
-        except ValueError:
-            continue
-    raise ValueError(f"filepath must be under {captures} or /dev/shm/")
+    return resolve_under_any([captures, Path("/dev/shm")], path)
 
 FREQ_MIN_HZ = 1_000_000
 FREQ_MAX_HZ = 6_000_000_000
@@ -140,11 +126,20 @@ class ReplayRequest(RfBase):
     tx_vga: int
     loop: bool = False
     max_duration_sec: float | None = None
+    # PP-LAB-RF-2026: TX amp hard-off (RX CaptureRequest may still use amp 0|1).
+    amp: Literal[0] = 0
 
     @field_validator("tx_vga")
     @classmethod
     def validate_tx_vga(cls, value: int) -> int:
         return _require_tx_vga(value)
+
+    @field_validator("amp")
+    @classmethod
+    def validate_tx_amp(cls, value: int) -> int:
+        if value != 0:
+            raise ValueError("External amp must remain off (amp=0) per active SCOPE")
+        return 0
 
     @field_validator("filepath")
     @classmethod
@@ -156,6 +151,12 @@ class ReplayRequest(RfBase):
             raise ValueError("IQ file must use .cs8 or .c8 extension")
         return resolved
 
+    @model_validator(mode="after")
+    def require_watchdog_when_loop(self) -> ReplayRequest:
+        if self.loop and self.max_duration_sec is None:
+            self.max_duration_sec = 60.0
+        return self
+
 
 class ContinuousTxRequest(RfBase):
     """CW / AWGN via hackrf_transfer -c."""
@@ -163,11 +164,19 @@ class ContinuousTxRequest(RfBase):
     amplitude: int = Field(..., ge=0, le=CW_AMPLITUDE_MAX)
     tx_vga: int
     max_duration_sec: float | None = None
+    amp: Literal[0] = 0
 
     @field_validator("tx_vga")
     @classmethod
     def validate_tx_vga(cls, value: int) -> int:
         return _require_tx_vga(value)
+
+    @field_validator("amp")
+    @classmethod
+    def validate_tx_amp(cls, value: int) -> int:
+        if value != 0:
+            raise ValueError("External amp must remain off (amp=0) per active SCOPE")
+        return 0
 
 
 class SweepRequest(BaseModel):

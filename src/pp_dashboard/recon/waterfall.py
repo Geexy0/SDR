@@ -320,7 +320,14 @@ class WaterfallSession:
             )
         elif cfg.action == "tx_tone":
             from pp_dashboard.models.rf import ContinuousTxRequest
+            from pp_dashboard.security.tx_gate import TxGateError, assert_tx_allowed
 
+            # Re-evaluate SCOPE/CONFIRM at fire time (not only at sweep start).
+            try:
+                assert_tx_allowed(amp=0)
+            except TxGateError:
+                log.warning("reactive tx_tone blocked by TX gate at fire time")
+                return
             await self.arbiter.start_continuous_tx(
                 ContinuousTxRequest(
                     frequency_hz=freq_hz,

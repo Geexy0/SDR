@@ -56,7 +56,13 @@ async def get_voice_recording_audio(
     row = engine.get_voice_recording(recording_id)
     if row is None:
         raise HTTPException(status_code=404, detail="recording not found")
-    path = Path(row["filepath"])
+    from pp_dashboard.config import settings
+    from pp_dashboard.security.paths import resolve_safe_path
+
+    try:
+        path = resolve_safe_path(settings.captures_dir / "voice", Path(row["filepath"]))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="recording path rejected") from exc
     if not path.is_file():
         raise HTTPException(status_code=404, detail="wav missing on disk")
     return FileResponse(path, media_type="audio/wav", filename=path.name)

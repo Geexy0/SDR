@@ -51,9 +51,7 @@ async def subghz_ws(websocket: WebSocket) -> None:
             text = (msg.get("text") or "").strip().lower()
             if text in {"stop", "close"}:
                 break
-            if text == "stop_sniff":
-                await engine.stop_sniff()
-                await websocket.send_json({"type": "status", "message": "sniff_stopped"})
+            # stop_sniff removed from WS (CSRF): use POST /api/subghz/sniff/stop
     except WebSocketDisconnect:
         log.info("subghz ws disconnected")
     finally:

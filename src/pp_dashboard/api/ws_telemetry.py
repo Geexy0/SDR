@@ -75,9 +75,8 @@ async def telemetry_socket(websocket: WebSocket) -> None:
             message = await websocket.receive()
             if message.get("type") == "websocket.disconnect":
                 break
-            text = message.get("text")
-            if text and text.strip().lower() in {"stop", "cancel"}:
-                await arbiter.stop_subprocess()
+            # Ignore side-effectful WS commands (CSRF / CSWSH). Use POST /api/hardware/stop.
+            _ = message.get("text")
     except WebSocketDisconnect:
         log.info("Telemetry client disconnected")
     finally:
