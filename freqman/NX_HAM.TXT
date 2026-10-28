@@ -1,0 +1,32 @@
+f=144800000,m=NFM,bw=12k5,d=2m APRS 144.8
+f=145225000,m=NFM,bw=12k5,d=2m Simplex 225
+f=145500000,m=NFM,bw=12k5,d=2m FM Calling
+f=145550000,m=NFM,bw=12k5,d=2m Simplex 550
+f=145575000,m=NFM,bw=12k5,d=2m Simplex 575
+f=145600000,m=NFM,bw=12k5,d=2m RPT out 01
+f=145612500,m=NFM,bw=12k5,d=2m RPT out 02
+f=145625000,m=NFM,bw=12k5,d=2m RPT out 03
+f=145637500,m=NFM,bw=12k5,d=2m RPT out 04
+f=145650000,m=NFM,bw=12k5,d=2m RPT out 05
+f=145662500,m=NFM,bw=12k5,d=2m RPT out 06
+f=145675000,m=NFM,bw=12k5,d=2m RPT out 07
+f=145687500,m=NFM,bw=12k5,d=2m RPT out 08
+f=145700000,m=NFM,bw=12k5,d=2m RPT out 09
+f=145712500,m=NFM,bw=12k5,d=2m RPT out 10
+f=145725000,m=NFM,bw=12k5,d=2m RPT out 11
+f=145737500,m=NFM,bw=12k5,d=2m RPT out 12
+f=145750000,m=NFM,bw=12k5,d=2m RPT out 13
+f=145762500,m=NFM,bw=12k5,d=2m RPT out 14
+f=145775000,m=NFM,bw=12k5,d=2m RPT out 15
+f=145787500,m=NFM,bw=12k5,d=2m RPT out 16
+f=430025000,m=NFM,bw=12k5,d=70cm RPT low
+f=433400000,m=NFM,bw=12k5,d=70cm Simplex
+f=433500000,m=NFM,bw=12k5,d=70cm FM Calling
+f=433550000,m=NFM,bw=12k5,d=70cm Simplex 550
+f=433575000,m=NFM,bw=12k5,d=70cm Simplex 575
+f=439000000,m=NFM,bw=12k5,d=70cm RPT region
+f=439100000,m=NFM,bw=12k5,d=70cm RPT region
+f=439200000,m=NFM,bw=12k5,d=70cm RPT region
+f=439300000,m=NFM,bw=12k5,d=70cm RPT region
+f=439400000,m=NFM,bw=12k5,d=70cm RPT region
+f=439500000,m=NFM,bw=12k5,d=70cm RPT region

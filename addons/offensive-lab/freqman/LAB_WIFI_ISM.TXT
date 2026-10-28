@@ -1,0 +1,7 @@
+a=2400000000,b=2483500000,m=SPEC,bw=1000k,s=1MHz,d=Lab WiFi 2.4 sweep
+a=5150000000,b=5850000000,m=SPEC,bw=1000k,s=5MHz,d=Lab WiFi 5 sweep
+f=2412000000,m=SPEC,bw=1000k,d=Lab ch1 center
+f=2437000000,m=SPEC,bw=1000k,d=Lab ch6 center
+f=2462000000,m=SPEC,bw=1000k,d=Lab ch11 center
+f=5180000000,m=SPEC,bw=1000k,d=Lab 5GHz low
+f=5745000000,m=SPEC,bw=1000k,d=Lab 5GHz mid

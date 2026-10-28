@@ -1,17 +1,23 @@
-# NORMANDY - local aviation / maritime / PMR / ham calling
-# Generated for PortaPack Mayhem FREQMAN (LF endings)
-
-# --- Local Aviation (AM) ---
-f=120325000,m=AM,d=Caen ATIS Weather
-f=118625000,m=AM,d=Caen Tower TWR
-f=134525000,m=AM,d=Normandy Approach
 f=121500000,m=AM,d=Air Guard 121.5
-
-# --- Maritime Safety (NFM) ---
-f=156800000,m=NFM,bw=12k5,d=Marine VHF Ch16
-f=156300000,m=NFM,bw=12k5,d=Marine Search Ch06
-
-# --- Analog PMR446 (16 ch, 12.5 kHz) ---
+f=123100000,m=AM,d=SAR 123.1
+f=123080000,m=AM,d=Caen ATIS 123.08
+f=134530000,m=AM,d=Caen TWR 134.53
+f=121790000,m=AM,d=Caen GND 121.79
+f=119180000,m=AM,d=Deauv ATIS 119.18
+f=118305000,m=AM,d=Deauv TWR 118.30
+f=120350000,m=AM,d=Rennes APP 120.35
+f=134200000,m=AM,d=Rennes APP 134.2
+f=126950000,m=AM,d=Rennes INFO 126.95
+f=119625000,m=AM,d=Cherbourg INFO
+f=135205000,m=AM,d=Le Havre INFO
+f=156800000,m=NFM,bw=12k5,d=Marine Distress 16
+f=156300000,m=NFM,bw=12k5,d=Marine SAR Ch06
+f=156400000,m=NFM,bw=12k5,d=Marine Ch08
+f=156450000,m=NFM,bw=12k5,d=Marine Pilot Ch09
+f=156500000,m=NFM,bw=12k5,d=Marine Ch10
+f=156550000,m=NFM,bw=12k5,d=Marine Port Ch11
+f=156600000,m=NFM,bw=12k5,d=Marine Port Ch12
+f=156650000,m=NFM,bw=12k5,d=Marine Bridge Ch13
 f=446006250,m=NFM,bw=12k5,d=PMR446 Ch 01
 f=446018750,m=NFM,bw=12k5,d=PMR446 Ch 02
 f=446031250,m=NFM,bw=12k5,d=PMR446 Ch 03
@@ -28,7 +34,10 @@ f=446156250,m=NFM,bw=12k5,d=PMR446 Ch 13
 f=446168750,m=NFM,bw=12k5,d=PMR446 Ch 14
 f=446181250,m=NFM,bw=12k5,d=PMR446 Ch 15
 f=446193750,m=NFM,bw=12k5,d=PMR446 Ch 16
-
-# --- Amateur 2m / 70cm calling ---
 f=145500000,m=NFM,bw=12k5,d=2m FM Calling
 f=433500000,m=NFM,bw=12k5,d=70cm FM Calling
+f=144800000,m=NFM,bw=12k5,d=2m APRS 144.8
+f=433920000,m=NFM,bw=12k5,d=ISM 433.92 OOK
+f=868300000,m=NFM,bw=12k5,d=ISM 868.3 EU
+f=868950000,m=NFM,bw=12k5,d=ISM 868.95
+f=869525000,m=NFM,bw=12k5,d=ISM 869.525

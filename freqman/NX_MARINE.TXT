@@ -1,0 +1,18 @@
+f=156800000,m=NFM,bw=12k5,d=Marine Distress 16
+f=156300000,m=NFM,bw=12k5,d=Marine SAR Ch06
+f=156400000,m=NFM,bw=12k5,d=Marine Ch08
+f=156450000,m=NFM,bw=12k5,d=Marine Pilot Ch09
+f=156500000,m=NFM,bw=12k5,d=Marine Ch10
+f=156550000,m=NFM,bw=12k5,d=Marine Port Ch11
+f=156600000,m=NFM,bw=12k5,d=Marine Port Ch12
+f=156650000,m=NFM,bw=12k5,d=Marine Bridge Ch13
+f=156700000,m=NFM,bw=12k5,d=Marine Port Ch14
+f=156375000,m=NFM,bw=12k5,d=Marine Ch67
+f=156425000,m=NFM,bw=12k5,d=Marine Ch68
+f=156475000,m=NFM,bw=12k5,d=Marine Ch69
+f=156575000,m=NFM,bw=12k5,d=Marine Ch71
+f=156625000,m=NFM,bw=12k5,d=Marine Ch72
+f=156675000,m=NFM,bw=12k5,d=Marine Ch73
+f=156875000,m=NFM,bw=12k5,d=Marine Ch77
+f=156750000,m=NFM,bw=12k5,d=Marine Ch15
+f=156850000,m=NFM,bw=12k5,d=Marine Ch17

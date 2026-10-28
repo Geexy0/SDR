@@ -1,0 +1,7 @@
+a=87500000,b=108000000,m=WFM,bw=200k,s=100kHz,d=FM Broadcast FR
+f=87800000,m=WFM,bw=200k,d=FM low edge
+f=95000000,m=WFM,bw=200k,d=FM mid band
+f=100700000,m=WFM,bw=200k,d=FM mid-high
+f=105500000,m=WFM,bw=200k,d=FM high
+f=162000,m=AM,d=ALS162 time FR
+f=198000,m=AM,d=LW BBC4-ish

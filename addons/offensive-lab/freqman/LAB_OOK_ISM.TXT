@@ -1,0 +1,14 @@
+f=433920000,m=NFM,bw=12k5,d=Lab ISM 433.92
+f=433420000,m=NFM,bw=12k5,d=Lab OOK 433.42
+f=434420000,m=NFM,bw=12k5,d=Lab OOK 434.42
+f=433075000,m=NFM,bw=12k5,d=LPD433 Ch01 lab
+f=433900000,m=NFM,bw=12k5,d=Lab remote mid
+f=868300000,m=NFM,bw=12k5,d=Lab ISM 868.3
+f=868950000,m=NFM,bw=12k5,d=Lab ISM 868.95
+f=869525000,m=NFM,bw=12k5,d=Lab ISM 869.525
+f=315000000,m=NFM,bw=12k5,d=Lab keyfob 315
+f=318000000,m=NFM,bw=12k5,d=Lab keyfob 318
+f=390000000,m=NFM,bw=12k5,d=Lab keyfob 390
+f=403550000,m=NFM,bw=12k5,d=Lab TPMS-ish
+f=433920000,m=SPEC,bw=250k,d=Lab IQ peek 433
+f=868300000,m=SPEC,bw=250k,d=Lab IQ peek 868

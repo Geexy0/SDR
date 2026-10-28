@@ -1,0 +1,4 @@
+f=433920000,m=SPEC,bw=250k,d=LightJam lab 433
+f=868300000,m=SPEC,bw=250k,d=LightJam lab 868
+f=2412000000,m=SPEC,bw=1000k,d=LightJam lab WiFi ch1
+f=2437000000,m=SPEC,bw=1000k,d=LightJam lab WiFi ch6
