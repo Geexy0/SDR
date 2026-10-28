@@ -1,0 +1,51 @@
+@import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
+
+@theme {
+  --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+  --color-rx: #10b981;
+  --color-warn: #f59e0b;
+  --color-tx: #ef4444;
+  --color-spec: #06b6d4;
+}
+
+html,
+body,
+#root {
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  overflow: hidden;
+  background: #020617;
+  font-family: var(--font-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+
+.panel {
+  background: rgb(15 23 42 / 0.9);
+  border: 1px solid #1e293b;
+}
+
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  min-height: 220px;
+  background: #0f172a;
+  font-family: var(--font-mono);
+  z-index: 0;
+}
