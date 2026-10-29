@@ -46,10 +46,17 @@ class VoiceRecordingStore:
                     peak_rssi_db REAL,
                     ctcss_hz REAL,
                     duration_sec REAL NOT NULL,
-                    filepath TEXT NOT NULL
+                    filepath TEXT NOT NULL,
+                    lat REAL,
+                    lon REAL
                 )
                 """
             )
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(voice_recordings)").fetchall()}
+            if "lat" not in cols:
+                conn.execute("ALTER TABLE voice_recordings ADD COLUMN lat REAL")
+            if "lon" not in cols:
+                conn.execute("ALTER TABLE voice_recordings ADD COLUMN lon REAL")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_voice_ts ON voice_recordings(timestamp DESC)"
             )
@@ -65,14 +72,29 @@ class VoiceRecordingStore:
         duration_sec: float,
         filepath: Path,
         timestamp: str | None = None,
+        lat: float | None = None,
+        lon: float | None = None,
     ) -> dict[str, Any]:
         ts = timestamp or datetime.now(timezone.utc).isoformat()
+        if lat is None or lon is None:
+            try:
+                from pp_dashboard.geoloc.service import GeolocService
+
+                svc = GeolocService._instance  # noqa: SLF001
+                if svc is not None:
+                    op = svc.store.get_operator()
+                    if op is not None:
+                        lat = float(op["lat"])
+                        lon = float(op["lon"])
+            except Exception:
+                pass
         with self._connect() as conn:
             cur = conn.execute(
                 """
                 INSERT INTO voice_recordings
-                  (timestamp, band_name, freq_hz, peak_rssi_db, ctcss_hz, duration_sec, filepath)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                  (timestamp, band_name, freq_hz, peak_rssi_db, ctcss_hz, duration_sec,
+                   filepath, lat, lon)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     ts,
@@ -82,10 +104,27 @@ class VoiceRecordingStore:
                     ctcss_hz,
                     float(duration_sec),
                     str(filepath),
+                    lat,
+                    lon,
                 ),
             )
             conn.commit()
             rid = int(cur.lastrowid)
+        if lat is not None and lon is not None:
+            try:
+                from pp_dashboard.geoloc.service import stamp_rf_hit
+
+                stamp_rf_hit(
+                    kind="voice",
+                    frequency_hz=int(freq_hz),
+                    rssi_db=peak_rssi_db,
+                    label=band_name,
+                    ref_id=str(rid),
+                    lat=lat,
+                    lon=lon,
+                )
+            except Exception:
+                pass
         row = self.get(rid)
         assert row is not None
         return row
@@ -95,7 +134,7 @@ class VoiceRecordingStore:
             rows = conn.execute(
                 """
                 SELECT id, timestamp, band_name, freq_hz, peak_rssi_db, ctcss_hz,
-                       duration_sec, filepath
+                       duration_sec, filepath, lat, lon
                 FROM voice_recordings
                 ORDER BY id DESC
                 LIMIT ?
@@ -109,7 +148,7 @@ class VoiceRecordingStore:
             r = conn.execute(
                 """
                 SELECT id, timestamp, band_name, freq_hz, peak_rssi_db, ctcss_hz,
-                       duration_sec, filepath
+                       duration_sec, filepath, lat, lon
                 FROM voice_recordings WHERE id = ?
                 """,
                 (int(recording_id),),
@@ -118,6 +157,7 @@ class VoiceRecordingStore:
 
     @staticmethod
     def _row(r: sqlite3.Row) -> dict[str, Any]:
+        keys = set(r.keys())
         return {
             "id": int(r["id"]),
             "timestamp": str(r["timestamp"]),
@@ -127,6 +167,8 @@ class VoiceRecordingStore:
             "ctcss_hz": r["ctcss_hz"],
             "duration_sec": float(r["duration_sec"]),
             "filepath": str(r["filepath"]),
+            "lat": r["lat"] if "lat" in keys else None,
+            "lon": r["lon"] if "lon" in keys else None,
         }
 
     def make_capture_path(self, *, band_name: str, freq_hz: int) -> Path:

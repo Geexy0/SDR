@@ -9,7 +9,9 @@ Linux + Mayhem tooling for **HackRF Pro / PortaPack H4M** (serial control, FREQM
 Open, receive-first work. No lab allow-list required:
 
 - Spectrum RX: sweeps, waterfall, IQ capture, voice-band auto-recon, decoder pipelines (ADS-B/AIS/POCSAG, etc.)
-- ISM / Sub-GHz RX: `rtl_433` sniff, pulse analyze, TPMS sensor ID mapping & fleet tagging UI
+- ISM / Sub-GHz RX: `rtl_433` sniff, pulse analyze, Packet Workbench (baud/mod tag), TPMS sensor ID mapping & fleet tagging UI
+- Autonomous RX Mission Scheduler (sweep → burst capture → analyze → FREQMAN export)
+- Operator GPS / RF breadcrumbs / LOB DF / range rings / track CPA / GNSS L1 RX interference sample (receive-only geoloc)
 - FREQMAN / Looking Glass style lists (aviation, marine, amateur, PMR/LPD, ISM)
 - Mayhem serial helpers, SD deploy, official Mayhem SD content
 - Defensive / awareness documentation for public RF formats

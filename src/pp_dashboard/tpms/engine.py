@@ -135,6 +135,17 @@ class TpmsEngine:
         )
         self.frequency_hz = primary
         self.hop_frequencies_hz = hops
+        if receiver_lat is None or receiver_lon is None:
+            try:
+                from pp_dashboard.geoloc.service import GeolocService
+
+                svc = GeolocService._instance  # noqa: SLF001
+                op = svc.store.get_operator() if svc is not None else None
+                if op is not None:
+                    receiver_lat = float(op["lat"])
+                    receiver_lon = float(op["lon"])
+            except Exception:
+                pass
         self.receiver_lat = receiver_lat
         self.receiver_lon = receiver_lon
         self.auto_link_vehicles = auto_link_vehicles
@@ -271,6 +282,21 @@ class TpmsEngine:
             lat=self.receiver_lat,
             lon=self.receiver_lon,
         )
+        if self.receiver_lat is not None and self.receiver_lon is not None:
+            try:
+                from pp_dashboard.geoloc.service import stamp_rf_hit
+
+                stamp_rf_hit(
+                    kind="tpms",
+                    frequency_hz=self.frequency_hz,
+                    rssi_db=None,
+                    label=sighting.last_model or sensor_id,
+                    ref_id=sensor_id,
+                    lat=self.receiver_lat,
+                    lon=self.receiver_lon,
+                )
+            except Exception:
+                log.debug("tpms geoloc stamp skipped", exc_info=True)
         cluster, _ = self.clusterer.observe(
             sensor_id,
             oem_family=oem,  # type: ignore[arg-type]

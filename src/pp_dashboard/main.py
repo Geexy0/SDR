@@ -11,6 +11,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from pp_dashboard import __version__
+from pp_dashboard.api.routes_geoloc import router as geoloc_router
 from pp_dashboard.api.routes_hardware import router as hardware_router
 from pp_dashboard.api.routes_mayhem import router as mayhem_router
 from pp_dashboard.api.routes_recon import router as recon_router
@@ -92,6 +93,12 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     arbiter = await get_arbiter()
     await arbiter.refresh_detection()
     try:
+        from pp_dashboard.geoloc.service import GeolocService
+
+        await GeolocService.get_instance()
+    except Exception:
+        log.exception("geoloc service init failed")
+    try:
         await _wire_sdr_busy_registry(arbiter)
     except Exception:
         log.exception("SDR busy registry wiring failed")
@@ -129,7 +136,10 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="PortaPack H4M / HackRF Pro Dashboard",
         version=__version__,
-        description="Phase 1–5 + Voice WebAudio/CTCSS/VOX — Arbiter, RF, Mayhem, Sub-GHz, Recon",
+        description=(
+            "v0.7.0 Cyber-Deck — Arbiter, RF, Mayhem, Sub-GHz Workbench, "
+            "Recon missions, Geoloc/DF, Voice/TPMS, gated TX"
+        ),
         lifespan=lifespan,
     )
     app.include_router(hardware_router)
@@ -139,6 +149,7 @@ def create_app() -> FastAPI:
     app.include_router(mayhem_router)
     app.include_router(subghz_router)
     app.include_router(tpms_router)
+    app.include_router(geoloc_router)
     app.include_router(recon_router)
     app.include_router(telemetry_router)
     app.include_router(mayhem_screen_router)
