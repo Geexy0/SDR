@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from pp_dashboard.api.ws_origin import accept_local_ws
 from pp_dashboard.subghz.engine import get_subghz_engine
 
 log = logging.getLogger(__name__)
@@ -16,7 +17,8 @@ router = APIRouter(tags=["subghz-ws"])
 
 @router.websocket("/ws/subghz")
 async def subghz_ws(websocket: WebSocket) -> None:
-    await websocket.accept()
+    if not await accept_local_ws(websocket):
+        return
     engine = await get_subghz_engine()
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=256)
 

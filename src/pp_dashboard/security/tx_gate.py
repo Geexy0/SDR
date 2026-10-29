@@ -18,6 +18,7 @@ _WINDOW_RE = re.compile(
     re.IGNORECASE,
 )
 _ALLOWED_TARGETS = frozenset({f"T{i}" for i in range(1, 8)})
+_LOOP_MAX_DURATION_SEC = 60.0
 
 
 class TxGateError(PermissionError):
@@ -79,13 +80,14 @@ def assert_tx_allowed(
     target_id: str | None = None,
     amp: int = 0,
     today: date | None = None,
+    max_duration_sec: float | None = None,
 ) -> None:
     """Raise TxGateError unless SCOPE is ACTIVE and CONFIRM is CONFIRMED for same engagement.
 
     Re-reads SCOPE.md and CONFIRM.md on every call (fail-closed snapshot).
-    ``require_loop_ok`` documents continuous/loop TX; the same gate still applies.
+    When ``require_loop_ok`` is True (looped ``-R`` TX), ``max_duration_sec`` must be
+    set and ``<= 60`` so the arbiter watchdog is always armed.
     """
-    _ = require_loop_ok
     scope_text = _read_gate_file(SCOPE_PATH)
     confirm_text = _read_gate_file(CONFIRM_PATH)
 
@@ -119,6 +121,16 @@ def assert_tx_allowed(
     # PP-LAB-RF-2026: AMP off hard rule unless SCOPE amends (currently forbids AMP on).
     if int(amp) != 0:
         raise TxGateError("TX denied: AMP must be off (-a 0) under PP-LAB-RF-2026")
+
+    if require_loop_ok:
+        if max_duration_sec is None or float(max_duration_sec) <= 0:
+            raise TxGateError(
+                "TX denied: looped TX requires max_duration_sec watchdog (<= 60s)"
+            )
+        if float(max_duration_sec) > _LOOP_MAX_DURATION_SEC:
+            raise TxGateError(
+                f"TX denied: looped TX max_duration_sec must be <= {_LOOP_MAX_DURATION_SEC}"
+            )
 
 
 def force_amp_off(amp: int) -> int:

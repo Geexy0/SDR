@@ -111,6 +111,7 @@ class WaterfallSession:
     async def start(self) -> list[str]:
         if self.running:
             raise RuntimeError("waterfall already running")
+        self.arbiter.assert_sdr_idle(excluding="waterfall")
         await self.arbiter.cancel_watchdog()
         async with self.arbiter.lock:
             await self.arbiter.refresh_detection()

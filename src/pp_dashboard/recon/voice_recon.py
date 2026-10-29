@@ -221,6 +221,8 @@ class AutoVoiceReconSession:
         if self.running:
             raise RuntimeError("auto voice recon already running")
         mux = self._mux()
+        if mux is None:
+            self.arbiter.assert_sdr_idle(excluding="voice_recon")
         await self.arbiter.cancel_watchdog()
         if mux is None:
             async with self.arbiter.lock:

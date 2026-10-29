@@ -130,12 +130,12 @@ async def start_app(
     try:
         # Gate TX apps before touching serial so CONFIRM lock works offline.
         if is_tx_capable_app(body.app_id):
-            assert_tx_allowed()
+            assert_tx_allowed(amp=0)
         apps = await bridge.applist()
         shorts = {a.short_name.lower() for a in apps}
         resolved = resolve_featured_short_name(body.app_id, shorts)
         if is_tx_capable_app(resolved) and not is_tx_capable_app(body.app_id):
-            assert_tx_allowed()
+            assert_tx_allowed(amp=0)
         resp = await bridge.appstart(resolved)
         return MayhemAppStartResponse(app_id=body.app_id, resolved_id=resolved, response=resp)
     except TxGateError as exc:

@@ -9,6 +9,7 @@ import struct
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from pp_dashboard.api.ws_origin import accept_local_ws
 from pp_dashboard.hardware.arbiter import get_arbiter
 from pp_dashboard.hardware.state import HardwareState
 from pp_dashboard.mayhem.bridge import MayhemBridgeError, get_mayhem_bridge
@@ -22,7 +23,8 @@ _MAGIC = b"MHSC"
 
 @router.websocket("/ws/mayhem-screen")
 async def mayhem_screen(websocket: WebSocket) -> None:
-    await websocket.accept()
+    if not await accept_local_ws(websocket):
+        return
     arbiter = await get_arbiter()
     await arbiter.refresh_detection()
     if arbiter.state is not HardwareState.MAYHEM_SERIAL:

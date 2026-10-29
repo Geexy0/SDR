@@ -236,3 +236,147 @@ async def test_stop_does_not_require_ws_side_effect(
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.post("/api/hardware/stop")
         assert resp.status_code == 200
+
+
+def test_replay_loop_defaults_watchdog_ceiling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pp_dashboard import config as cfg
+
+    monkeypatch.setattr(cfg.settings, "captures_dir", tmp_path)
+    iq = tmp_path / "loop.cs8"
+    iq.write_bytes(bytes([1, 0] * 32))
+    req = ReplayRequest(
+        filepath=iq,
+        frequency_hz=433_920_000,
+        sample_rate=2_000_000,
+        tx_vga=10,
+        amp=0,
+        loop=True,
+        max_duration_sec=None,
+    )
+    assert req.max_duration_sec is not None
+    assert req.max_duration_sec <= 60.0
+    req2 = ReplayRequest(
+        filepath=iq,
+        frequency_hz=433_920_000,
+        sample_rate=2_000_000,
+        tx_vga=10,
+        amp=0,
+        loop=True,
+        max_duration_sec=120.0,
+    )
+    assert req2.max_duration_sec == 60.0
+
+
+def test_require_loop_ok_enforces_watchdog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scope, confirm = _write_gate(tmp_path)
+    monkeypatch.setattr(tx_gate, "SCOPE_PATH", scope)
+    monkeypatch.setattr(tx_gate, "CONFIRM_PATH", confirm)
+    with pytest.raises(tx_gate.TxGateError, match="max_duration"):
+        tx_gate.assert_tx_allowed(require_loop_ok=True, max_duration_sec=None)
+    with pytest.raises(tx_gate.TxGateError, match="<= 60"):
+        tx_gate.assert_tx_allowed(require_loop_ok=True, max_duration_sec=90.0)
+    tx_gate.assert_tx_allowed(require_loop_ok=True, max_duration_sec=30.0)
+
+
+def test_bruteforce_shm_traversal_rejected() -> None:
+    from pp_dashboard.models.subghz import BruteforceRequest
+
+    with pytest.raises(ValidationError):
+        BruteforceRequest(
+            mode="framed",
+            frequency_hz=433_920_000,
+            sample_rate=2_000_000,
+            tx_vga=10,
+            amp=0,
+            family="PT2262",
+            nbits=8,
+            key_start=0,
+            key_end=2,
+            out_path=Path("/dev/shm/../tmp/evil.cs8"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_stop_invokes_registered_callbacks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scope, confirm = _write_gate(tmp_path)
+    monkeypatch.setattr(tx_gate, "SCOPE_PATH", scope)
+    monkeypatch.setattr(tx_gate, "CONFIRM_PATH", confirm)
+    HardwareArbiter.reset_instance_for_tests()
+    arbiter = await HardwareArbiter.get_instance()
+    calls: list[str] = []
+
+    async def _cb() -> None:
+        calls.append("waterfall")
+
+    arbiter.register_stop_callback("waterfall", _cb)
+    arbiter.register_busy_check("waterfall", lambda: False)
+    await arbiter.stop_subprocess(reason="audit")
+    assert "waterfall" in calls
+
+
+def test_verify_ws_origin_local_only() -> None:
+    from pp_dashboard.api.ws_origin import verify_ws_origin
+
+    class _FakeURL:
+        hostname = "127.0.0.1"
+
+    class _FakeWS:
+        def __init__(self, origin: str | None) -> None:
+            self.headers = {"origin": origin} if origin else {}
+            self.url = _FakeURL()
+
+    assert verify_ws_origin(_FakeWS(None)) is True  # type: ignore[arg-type]
+    assert verify_ws_origin(_FakeWS("http://127.0.0.1:8765")) is True  # type: ignore[arg-type]
+    assert verify_ws_origin(_FakeWS("http://localhost:8765")) is True  # type: ignore[arg-type]
+    assert verify_ws_origin(_FakeWS("https://evil.example")) is False  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_waterfall_attach_idempotent_subscribe() -> None:
+    """Repeated attach must not stack duplicate handlers (subscribe dedup)."""
+    from pp_dashboard.recon.waterfall import WaterfallSession
+
+    class _Arb:
+        pass
+
+    session = WaterfallSession(
+        arbiter=_Arb(),  # type: ignore[arg-type]
+        start_mhz=400,
+        stop_mhz=450,
+        bin_width_hz=100_000,
+        lna=16,
+        vga=20,
+        amp=0,
+    )
+    hits: list[int] = []
+
+    async def handler(_payload: dict) -> None:
+        hits.append(1)
+
+    session.subscribe(handler)
+    session.subscribe(handler)
+    session.subscribe(handler)
+    assert session._handlers.count(handler) == 1  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_voice_path_outside_captures_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pp_dashboard import config as cfg
+    from pp_dashboard.recon.engine import ReconEngine
+    from pp_dashboard.security.paths import resolve_safe_path
+
+    voice = tmp_path / "captures" / "voice"
+    voice.mkdir(parents=True)
+    monkeypatch.setattr(cfg.settings, "captures_dir", tmp_path / "captures")
+    evil = tmp_path / "etc_passwd.wav"
+    evil.write_bytes(b"RIFF")
+    with pytest.raises(ValueError):
+        resolve_safe_path(voice, evil)

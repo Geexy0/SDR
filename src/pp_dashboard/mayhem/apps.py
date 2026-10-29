@@ -34,15 +34,20 @@ FEATURED_APPS: tuple[FeaturedApp, ...] = (
 _TX_APP_NAMES = frozenset(
     {
         "jammer",
+        "replay",
         "bletx",
         "blespam",
         "ble_tx",
-        "replay",
-        "pocsag_tx",
         "ook",
         "ooktx",
-        "afsk_tx",
+        "sstv_tx",
+        "pocsag_tx",
         "morse",
+        "tones",
+        "rds",
+        "touchtunes",
+        "lrs",
+        "afsk_tx",
         "epirb_tx",
     }
 )
@@ -61,9 +66,10 @@ def featured_category(name: str) -> str | None:
 def is_tx_capable_app(name: str) -> bool:
     """True if appstart would enter a Transmit / RF-emit Mayhem app."""
     needle = name.strip().lower()
-    if featured_category(needle) == "Transmit":
+    # Explicit TX IDs win over featured aliases (e.g. pocsag_tx ≠ Receive pocsag).
+    if needle in _TX_APP_NAMES:
         return True
-    return needle in _TX_APP_NAMES
+    return featured_category(needle) == "Transmit"
 
 
 def resolve_featured_short_name(name: str, applist_shorts: set[str]) -> str:

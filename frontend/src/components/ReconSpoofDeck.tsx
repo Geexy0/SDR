@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
-import { api, wsUrl, type VoiceRecordingRow } from "@/lib/api";
+import { api, type VoiceRecordingRow } from "@/lib/api";
 import { useHardwareStore } from "@/store/useHardwareStore";
 import { CtcssPill, WebAudioPlayer } from "./WebAudioPlayer";
 
@@ -195,131 +195,128 @@ export function ReconSpoofDeck() {
     }
   }, [spoofPin]);
 
+  const telemetrySeq = useHardwareStore((s) => s.telemetrySeq);
+  const lastTelemetry = useHardwareStore((s) => s.lastTelemetry);
+
   useEffect(() => {
-    const ws = new WebSocket(wsUrl("/ws/telemetry"));
-    ws.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data as string) as {
-          message?: string;
-          metrics?: Record<string, unknown>;
-          type?: string;
-        };
-        if (msg.message === "pocsag" || msg.message === "decoder_line") {
-          const line = String(
-            msg.metrics?.raw ?? msg.metrics?.line ?? msg.metrics?.text ?? "",
-          );
-          if (line) pushPocsag(line);
-        }
-        if (msg.message?.startsWith("decoder_started:")) {
-          const kind = msg.message.split(":")[1];
-          if (kind === "adsb" || kind === "ais") setTrackMode(kind);
-        }
-        if (msg.message === "decoder_stopped") {
-          setTrackMode("idle");
-        }
-        if (msg.message === "voice_recon" && msg.metrics) {
-          const m = msg.metrics;
-          const phase = String(m.phase ?? "");
-          if (phase) setVoicePhase(phase);
-          setVoiceRunning(Boolean(m.running));
-          setVoiceBand(m.band != null ? String(m.band) : null);
-          setVoiceFreq(
-            typeof m.listen_hz === "number"
-              ? m.listen_hz
-              : typeof m.frequency_hz === "number"
-                ? m.frequency_hz
-                : null,
-          );
-          if (typeof m.listen_rssi_db === "number") setVoiceRssi(m.listen_rssi_db);
-          else if (typeof m.rssi_db === "number") setVoiceRssi(m.rssi_db);
-          if (typeof m.lna === "number" && typeof m.vga === "number") {
-            setVoiceGain({ lna: m.lna, vga: m.vga });
-          }
-          if ("ctcss_hz" in m) {
-            setVoiceCtcss(typeof m.ctcss_hz === "number" ? m.ctcss_hz : null);
-          }
-          const ev = String(m.event ?? "");
-          if (ev && ev !== "dwell_tick") {
-            const mhz =
-              typeof m.frequency_hz === "number"
-                ? ` ${(m.frequency_hz / 1e6).toFixed(4)} MHz`
-                : "";
-            const pl =
-              typeof m.ctcss_hz === "number" ? ` · PL ${m.ctcss_hz.toFixed(1)}` : "";
-            const line = `${new Date().toLocaleTimeString()} · ${ev}${mhz}${pl}`;
-            setVoiceLog((prev) => [...prev.slice(-80), line]);
-          }
-          if (ev === "vox_saved") {
-            void refreshRecordings();
-          }
-          if (ev === "stopped") {
-            setVoiceRunning(false);
-            setVoicePhase("idle");
-            setVoiceCtcss(null);
-          }
-        }
-        if (msg.message === "adsb_meta" && msg.metrics) {
-          const poly = msg.metrics.range_polygon as number[][] | undefined;
-          const map = mapRef.current;
-          if (map && Array.isArray(poly) && poly.length >= 3) {
-            const latlngs = poly.map((p) => L.latLng(Number(p[0]), Number(p[1])));
-            if (rangeLayer.current) {
-              rangeLayer.current.setLatLngs(latlngs);
-            } else {
-              rangeLayer.current = L.polygon(latlngs, {
-                color: "#34d399",
-                weight: 1.5,
-                dashArray: "6 4",
-                fillColor: "#22d3ee",
-                fillOpacity: 0.08,
-              })
-                .bindTooltip("Max LOCAL_RF reception range", { sticky: true })
-                .addTo(map);
-            }
-          }
-        }
-        if (msg.message === "adsb") {
-          const lat = Number(msg.metrics?.lat);
-          const lon = Number(msg.metrics?.lon);
-          const icao = String(msg.metrics?.icao ?? "").toUpperCase();
-          const call = String(msg.metrics?.callsign ?? (icao || "AC")).trim();
-          const source = String(msg.metrics?.source ?? "");
-          const id = icao || `${lat.toFixed(3)},${lon.toFixed(3)}`;
-          upsertTrack(
-            aircraftLayer.current,
-            aircraftMarkers.current,
-            id,
-            lat,
-            lon,
-            call,
-            "#22d3ee",
-            setAircraftCount,
-            source,
-          );
-        }
-        if (msg.message === "ais") {
-          const lat = Number(msg.metrics?.lat);
-          const lon = Number(msg.metrics?.lon);
-          const mmsi = String(msg.metrics?.mmsi ?? "");
-          const name = String(msg.metrics?.name ?? (mmsi || "VES"));
-          const id = mmsi || `${lat.toFixed(3)},${lon.toFixed(3)}`;
-          upsertTrack(
-            vesselLayer.current,
-            vesselMarkers.current,
-            id,
-            lat,
-            lon,
-            name,
-            "#34d399",
-            setVesselCount,
-          );
-        }
-      } catch {
-        /* ignore */
+    // Consume shared HardwareHeader /ws/telemetry via Zustand (no second socket).
+    const msg = lastTelemetry;
+    if (!msg) return;
+    try {
+      if (msg.message === "pocsag" || msg.message === "decoder_line") {
+        const line = String(
+          msg.metrics?.raw ?? msg.metrics?.line ?? msg.metrics?.text ?? "",
+        );
+        if (line) pushPocsag(line);
       }
-    };
-    return () => ws.close();
-  }, [pushPocsag]);
+      if (msg.message?.startsWith("decoder_started:")) {
+        const kind = msg.message.split(":")[1];
+        if (kind === "adsb" || kind === "ais") setTrackMode(kind);
+      }
+      if (msg.message === "decoder_stopped") {
+        setTrackMode("idle");
+      }
+      if (msg.message === "voice_recon" && msg.metrics) {
+        const m = msg.metrics;
+        const phase = String(m.phase ?? "");
+        if (phase) setVoicePhase(phase);
+        setVoiceRunning(Boolean(m.running));
+        setVoiceBand(m.band != null ? String(m.band) : null);
+        setVoiceFreq(
+          typeof m.listen_hz === "number"
+            ? m.listen_hz
+            : typeof m.frequency_hz === "number"
+              ? m.frequency_hz
+              : null,
+        );
+        if (typeof m.listen_rssi_db === "number") setVoiceRssi(m.listen_rssi_db);
+        else if (typeof m.rssi_db === "number") setVoiceRssi(m.rssi_db);
+        if (typeof m.lna === "number" && typeof m.vga === "number") {
+          setVoiceGain({ lna: m.lna, vga: m.vga });
+        }
+        if ("ctcss_hz" in m) {
+          setVoiceCtcss(typeof m.ctcss_hz === "number" ? m.ctcss_hz : null);
+        }
+        const ev = String(m.event ?? "");
+        if (ev && ev !== "dwell_tick") {
+          const mhz =
+            typeof m.frequency_hz === "number"
+              ? ` ${(m.frequency_hz / 1e6).toFixed(4)} MHz`
+              : "";
+          const pl =
+            typeof m.ctcss_hz === "number" ? ` · PL ${m.ctcss_hz.toFixed(1)}` : "";
+          const line = `${new Date().toLocaleTimeString()} · ${ev}${mhz}${pl}`;
+          setVoiceLog((prev) => [...prev.slice(-80), line]);
+        }
+        if (ev === "vox_saved") {
+          void refreshRecordings();
+        }
+        if (ev === "stopped") {
+          setVoiceRunning(false);
+          setVoicePhase("idle");
+          setVoiceCtcss(null);
+        }
+      }
+      if (msg.message === "adsb_meta" && msg.metrics) {
+        const poly = msg.metrics.range_polygon as number[][] | undefined;
+        const map = mapRef.current;
+        if (map && Array.isArray(poly) && poly.length >= 3) {
+          const latlngs = poly.map((p) => L.latLng(Number(p[0]), Number(p[1])));
+          if (rangeLayer.current) {
+            rangeLayer.current.setLatLngs(latlngs);
+          } else {
+            rangeLayer.current = L.polygon(latlngs, {
+              color: "#34d399",
+              weight: 1.5,
+              dashArray: "6 4",
+              fillColor: "#22d3ee",
+              fillOpacity: 0.08,
+            })
+              .bindTooltip("Max LOCAL_RF reception range", { sticky: true })
+              .addTo(map);
+          }
+        }
+      }
+      if (msg.message === "adsb") {
+        const lat = Number(msg.metrics?.lat);
+        const lon = Number(msg.metrics?.lon);
+        const icao = String(msg.metrics?.icao ?? "").toUpperCase();
+        const call = String(msg.metrics?.callsign ?? (icao || "AC")).trim();
+        const source = String(msg.metrics?.source ?? "");
+        const id = icao || `${lat.toFixed(3)},${lon.toFixed(3)}`;
+        upsertTrack(
+          aircraftLayer.current,
+          aircraftMarkers.current,
+          id,
+          lat,
+          lon,
+          call,
+          "#22d3ee",
+          setAircraftCount,
+          source,
+        );
+      }
+      if (msg.message === "ais") {
+        const lat = Number(msg.metrics?.lat);
+        const lon = Number(msg.metrics?.lon);
+        const mmsi = String(msg.metrics?.mmsi ?? "");
+        const name = String(msg.metrics?.name ?? (mmsi || "VES"));
+        const id = mmsi || `${lat.toFixed(3)},${lon.toFixed(3)}`;
+        upsertTrack(
+          vesselLayer.current,
+          vesselMarkers.current,
+          id,
+          lat,
+          lon,
+          name,
+          "#34d399",
+          setVesselCount,
+        );
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [telemetrySeq, lastTelemetry, pushPocsag]);
 
   const startTracks = async (kind: "adsb" | "ais") => {
     setTrackBusy(true);

@@ -61,7 +61,11 @@ async def bruteforce(
     body: BruteforceRequest, engine: SubGhzEngine = Depends(engine_dep)
 ) -> dict:
     try:
-        assert_tx_allowed(require_loop_ok=body.loop_tx)
+        assert_tx_allowed(
+            require_loop_ok=body.loop_tx,
+            amp=body.amp,
+            max_duration_sec=body.max_duration_sec if body.loop_tx else None,
+        )
     except TxGateError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     return await _run(engine.bruteforce(body))

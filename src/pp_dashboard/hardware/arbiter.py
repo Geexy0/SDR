@@ -46,6 +46,54 @@ class HardwareArbiter:
         self._idle_after_busy: HardwareState = HardwareState.HACKRF_NATIVE
         self._watchdog_task: asyncio.Task[None] | None = None
         self.multiplexer: Any | None = None
+        self._stop_callbacks: dict[str, Callable[[], Awaitable[None]]] = {}
+        self._busy_checks: dict[str, Callable[[], bool]] = {}
+        self._shm_artifacts: list[Path] = []
+
+    def track_shm_artifact(self, path: Path) -> None:
+        """Remember a /dev/shm IQ file for unlink on global stop."""
+        self._shm_artifacts.append(Path(path))
+
+    def _cleanup_shm_artifacts(self) -> None:
+        shm_root = Path("/dev/shm").resolve()
+        remaining: list[Path] = []
+        for path in self._shm_artifacts:
+            try:
+                resolved = path.expanduser().resolve()
+                resolved.relative_to(shm_root)
+                if resolved.is_file():
+                    resolved.unlink(missing_ok=True)
+            except (OSError, ValueError):
+                remaining.append(path)
+        self._shm_artifacts = remaining
+
+    def register_stop_callback(
+        self, name: str, fn: Callable[[], Awaitable[None]]
+    ) -> None:
+        """Register an async teardown invoked by ``stop_subprocess`` / global kill."""
+        self._stop_callbacks[name] = fn
+
+    def register_busy_check(self, name: str, fn: Callable[[], bool]) -> None:
+        """Register a sidecar busy predicate (waterfall, decoder, sniff, …)."""
+        self._busy_checks[name] = fn
+
+    def is_sdr_busy(self) -> bool:
+        if self.runner.running:
+            return True
+        if self.multiplexer is not None and getattr(self.multiplexer, "running", False):
+            return True
+        return any(check() for check in self._busy_checks.values())
+
+    def assert_sdr_idle(self, *, excluding: str | None = None) -> None:
+        if self.runner.running:
+            raise RuntimeError("SDR subprocess already running")
+        if self.multiplexer is not None and getattr(self.multiplexer, "running", False):
+            raise RuntimeError("IQ multiplexer already running — stop MULTIPLEX_RX first")
+        for name, check in self._busy_checks.items():
+            if excluding is not None and name == excluding:
+                continue
+            if check():
+                raise RuntimeError(f"SDR busy ({name}) — stop current job first")
 
     @classmethod
     async def get_instance(cls, cfg: Settings | None = None) -> HardwareArbiter:
@@ -432,8 +480,14 @@ class HardwareArbiter:
             await self.refresh_detection()
             if self.state != HardwareState.HACKRF_NATIVE:
                 await self._to_native_locked()
+            # Sidecar busy checks (waterfall/decoder/voice/…) — do not clear BUSY without stop.
+            for name, check in self._busy_checks.items():
+                if check():
+                    raise RuntimeError(f"SDR busy ({name}) — stop current job first")
             if self.runner.running:
                 raise RuntimeError("SDR subprocess already running")
+            if self.multiplexer is not None and getattr(self.multiplexer, "running", False):
+                raise RuntimeError("IQ multiplexer already running — stop MULTIPLEX_RX first")
             self._idle_after_busy = HardwareState.HACKRF_NATIVE
             await self.runner.start(argv, busy_state=busy)
             self.state = busy
@@ -502,8 +556,7 @@ class HardwareArbiter:
 
         if self.multiplexer is not None and getattr(self.multiplexer, "running", False):
             raise RuntimeError("IQ multiplexer already running")
-        if self.runner.running:
-            raise RuntimeError("stop other SDR job before MULTIPLEX_RX")
+        self.assert_sdr_idle()
         mux = IQMultiplexer(
             arbiter=self,
             center_hz=req.center_hz,
@@ -542,7 +595,13 @@ class HardwareArbiter:
         return self.status()
 
     async def _stop_sidecar_sessions(self, *, reason: str) -> None:
-        """Stop recon/TPMS owners outside the arbiter mutex (avoids lock deadlock)."""
+        """Stop registered owners outside the arbiter mutex (avoids lock deadlock)."""
+        for name, callback in list(self._stop_callbacks.items()):
+            try:
+                await callback()
+            except Exception:
+                log.exception("stop callback %s failed (%s)", name, reason)
+        # Legacy fallback if engines registered late / tests skipped wiring.
         try:
             from pp_dashboard.recon.engine import ReconEngine
 
@@ -567,6 +626,14 @@ class HardwareArbiter:
                 await tpms.stop()
         except Exception:
             log.exception("sidecar tpms stop failed (%s)", reason)
+        try:
+            from pp_dashboard.subghz.engine import SubGhzEngine
+
+            sg = SubGhzEngine._instance  # noqa: SLF001
+            if sg is not None and getattr(sg.sniffer, "running", False):
+                await sg.stop_sniff()
+        except Exception:
+            log.exception("sidecar subghz stop failed (%s)", reason)
 
     async def stop_subprocess(self, *, reason: str = "api_stop") -> HardwareStatusResponse:
         # Sidecar teardown first, outside the mutex — sidecars may need the lock.
@@ -584,6 +651,7 @@ class HardwareArbiter:
                 HardwareState.MULTIPLEX_RX,
             }:
                 self.state = self._idle_after_busy
+            self._cleanup_shm_artifacts()
             await self._emit_status(f"subprocess_stopped:{reason}")
             return self.status()
 

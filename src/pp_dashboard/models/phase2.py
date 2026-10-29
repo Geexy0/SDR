@@ -203,6 +203,13 @@ class ReplayJobRequest(DurationMixin):
             return None
         return _clamp_duration(value)
 
+    @model_validator(mode="after")
+    def require_watchdog_when_loop(self) -> ReplayJobRequest:
+        if self.loop:
+            dur = 60.0 if self.max_duration_sec is None else float(self.max_duration_sec)
+            self.max_duration_sec = min(dur, MAX_DURATION_SEC)
+        return self
+
 
 class RolljamPhase(str, Enum):
     CAPTURE_THEN_REPLAY = "CAPTURE_THEN_REPLAY"

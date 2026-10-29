@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+from typing import Any
 
 import uvicorn
 from fastapi import FastAPI
@@ -36,10 +37,61 @@ logging.basicConfig(
 log = logging.getLogger("pp_dashboard")
 
 
+async def _wire_sdr_busy_registry(arbiter: Any) -> None:
+    """Register recon / Sub-GHz busy checks + stop callbacks on the arbiter."""
+    from pp_dashboard.recon.engine import get_recon_engine
+    from pp_dashboard.subghz.engine import get_subghz_engine
+
+    recon = await get_recon_engine()
+    subghz = await get_subghz_engine()
+
+    arbiter.register_busy_check(
+        "waterfall",
+        lambda: bool(recon.waterfall is not None and recon.waterfall.running),
+    )
+    arbiter.register_busy_check(
+        "decoder",
+        lambda: bool(recon.decoder is not None and recon.decoder.running),
+    )
+    arbiter.register_busy_check(
+        "voice_recon",
+        lambda: bool(recon.voice_recon is not None and recon.voice_recon.running),
+    )
+    arbiter.register_busy_check(
+        "subghz",
+        lambda: bool(getattr(subghz.sniffer, "running", False)),
+    )
+
+    async def _stop_waterfall() -> None:
+        if recon.waterfall is not None and recon.waterfall.running:
+            await recon.stop_sweep()
+
+    async def _stop_decoder() -> None:
+        if recon.decoder is not None and recon.decoder.running:
+            await recon.stop_decoder()
+
+    async def _stop_voice() -> None:
+        if recon.voice_recon is not None and recon.voice_recon.running:
+            await recon.stop_voice_recon()
+
+    async def _stop_sniff() -> None:
+        if getattr(subghz.sniffer, "running", False):
+            await subghz.stop_sniff()
+
+    arbiter.register_stop_callback("waterfall", _stop_waterfall)
+    arbiter.register_stop_callback("decoder", _stop_decoder)
+    arbiter.register_stop_callback("voice_recon", _stop_voice)
+    arbiter.register_stop_callback("subghz", _stop_sniff)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     arbiter = await get_arbiter()
     await arbiter.refresh_detection()
+    try:
+        await _wire_sdr_busy_registry(arbiter)
+    except Exception:
+        log.exception("SDR busy registry wiring failed")
     log.info(
         "Hardware arbiter ready state=%s serial=%s",
         arbiter.state.value,

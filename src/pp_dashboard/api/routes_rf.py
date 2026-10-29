@@ -44,7 +44,11 @@ async def replay_iq(
     engine: RfEngine = Depends(engine_dep),
 ) -> HardwareStatusResponse:
     try:
-        assert_tx_allowed(require_loop_ok=body.loop)
+        assert_tx_allowed(
+            require_loop_ok=body.loop,
+            amp=body.amp,
+            max_duration_sec=body.max_duration_sec if body.loop else None,
+        )
     except TxGateError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     return await _run(engine.replay(body))
@@ -56,7 +60,11 @@ async def rolljam(
     engine: RfEngine = Depends(engine_dep),
 ) -> RolljamResponse:
     try:
-        assert_tx_allowed(require_loop_ok=body.replay_loop)
+        assert_tx_allowed(
+            require_loop_ok=body.replay_loop,
+            amp=body.amp,
+            max_duration_sec=body.replay_max_duration_sec if body.replay_loop else None,
+        )
     except TxGateError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     return await _run(engine.rolljam(body))

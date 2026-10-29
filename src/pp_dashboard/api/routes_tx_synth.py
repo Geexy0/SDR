@@ -26,7 +26,11 @@ async def synthesize(
     body: SynthesizeRequest, engine: ReconEngine = Depends(engine_dep)
 ) -> dict:
     try:
-        assert_tx_allowed(require_loop_ok=True)
+        assert_tx_allowed(
+            require_loop_ok=True,
+            amp=body.amp,
+            max_duration_sec=body.max_duration_sec,
+        )
     except TxGateError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     return await _run(engine.synthesize(body))

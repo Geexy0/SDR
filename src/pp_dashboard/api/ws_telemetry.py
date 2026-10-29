@@ -7,6 +7,7 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from pp_dashboard.api.ws_origin import accept_local_ws
 from pp_dashboard.hardware.arbiter import get_arbiter
 from pp_dashboard.models.rf import TelemetryEvent
 
@@ -21,7 +22,8 @@ _subscriber_lock = asyncio.Lock()
 @router.websocket("/ws/telemetry")
 async def telemetry_socket(websocket: WebSocket) -> None:
     global _subscriber_count
-    await websocket.accept()
+    if not await accept_local_ws(websocket):
+        return
     arbiter = await get_arbiter()
     queue: asyncio.Queue[TelemetryEvent] = asyncio.Queue(maxsize=256)
 

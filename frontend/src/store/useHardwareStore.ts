@@ -79,7 +79,22 @@ export interface HardwareStore {
   toast: string | null;
   backendOnline: boolean;
 
+  /** Latest /ws/telemetry frame from the single HardwareHeader socket. */
+  lastTelemetry: {
+    type?: string;
+    state?: HardwareState;
+    message?: string;
+    metrics?: Record<string, unknown>;
+  } | null;
+  telemetrySeq: number;
+
   setStatus: (s: HardwareStatus) => void;
+  pushTelemetry: (msg: {
+    type?: string;
+    state?: HardwareState;
+    message?: string;
+    metrics?: Record<string, unknown>;
+  }) => void;
   setBackendOnline: (online: boolean) => void;
   setFrequencyHz: (hz: number) => void;
   setFreqUnit: (u: FreqUnit) => void;
@@ -173,6 +188,9 @@ export const useHardwareStore = create<HardwareStore>((set) => ({
   toast: null,
   backendOnline: false,
 
+  lastTelemetry: null,
+  telemetrySeq: 0,
+
   setStatus: (s) =>
     set({
       hwState: s.state,
@@ -181,6 +199,12 @@ export const useHardwareStore = create<HardwareStore>((set) => ({
       lastError: s.last_error,
       backendOnline: true,
     }),
+  pushTelemetry: (msg) =>
+    set((st) => ({
+      lastTelemetry: msg,
+      telemetrySeq: st.telemetrySeq + 1,
+      ...(msg.state ? { hwState: msg.state, backendOnline: true } : {}),
+    })),
   setBackendOnline: (online) => set({ backendOnline: online }),
   setFrequencyHz: (hz) => set({ frequencyHz: Math.max(1e6, Math.min(6e9, Math.round(hz))) }),
   setFreqUnit: (u) => set({ freqUnit: u }),

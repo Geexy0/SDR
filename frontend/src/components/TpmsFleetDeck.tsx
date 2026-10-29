@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
-import { api, wsUrl } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useHardwareStore } from "@/store/useHardwareStore";
 
 type SensorRow = {
@@ -240,50 +240,48 @@ export function TpmsFleetDeck() {
     });
   }, [passages, mapLat, mapLon]);
 
+  const telemetrySeq = useHardwareStore((s) => s.telemetrySeq);
+  const lastTelemetry = useHardwareStore((s) => s.lastTelemetry);
+
   useEffect(() => {
-    const ws = new WebSocket(wsUrl("/ws/telemetry"));
-    ws.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data as string) as {
-          message?: string;
-          metrics?: Record<string, unknown>;
-        };
-        if (msg.message === "tpms_started") setListening(true);
-        if (msg.message === "tpms_stopped") setListening(false);
-        if (msg.message === "tpms_rx_health" && msg.metrics) {
-          const n = msg.metrics.last_noise_db;
-          if (typeof n === "number") setNoiseDb(n);
-          const d = msg.metrics.decode_count;
-          if (typeof d === "number") setDecodeCount(d);
-        }
-        if (msg.message === "tpms" && msg.metrics) {
-          const sid = String(msg.metrics.sensor_id ?? "");
-          const oem = String(msg.metrics.suggested_make ?? msg.metrics.oem_family ?? "");
-          const cluster = String(msg.metrics.cluster_key ?? "");
-          const line = `${new Date().toLocaleTimeString()} · ID ${sid}${
-            oem ? ` · ${oem}` : ""
-          }${cluster ? ` · ${cluster}` : ""}`;
-          setLog((prev) => [...prev.slice(-120), line]);
-          if (typeof msg.metrics.decode_count === "number") {
-            setDecodeCount(msg.metrics.decode_count);
-          }
-          void refresh().catch(() => undefined);
-        }
-        if (msg.message === "tpms_passage" && msg.metrics) {
-          const labelP = String(msg.metrics.label ?? "passage");
-          const makeP = String(msg.metrics.make ?? "");
-          setLog((prev) => [
-            ...prev.slice(-120),
-            `${new Date().toLocaleTimeString()} · PASSAGE ${labelP}${makeP ? ` · ${makeP}` : ""}`,
-          ]);
-          void refresh().catch(() => undefined);
-        }
-      } catch {
-        /* ignore */
+    // Shared HardwareHeader telemetry socket via Zustand — no duplicate WS.
+    const msg = lastTelemetry;
+    if (!msg) return;
+    try {
+      if (msg.message === "tpms_started") setListening(true);
+      if (msg.message === "tpms_stopped") setListening(false);
+      if (msg.message === "tpms_rx_health" && msg.metrics) {
+        const n = msg.metrics.last_noise_db;
+        if (typeof n === "number") setNoiseDb(n);
+        const d = msg.metrics.decode_count;
+        if (typeof d === "number") setDecodeCount(d);
       }
-    };
-    return () => ws.close();
-  }, []);
+      if (msg.message === "tpms" && msg.metrics) {
+        const sid = String(msg.metrics.sensor_id ?? "");
+        const oem = String(msg.metrics.suggested_make ?? msg.metrics.oem_family ?? "");
+        const cluster = String(msg.metrics.cluster_key ?? "");
+        const line = `${new Date().toLocaleTimeString()} · ID ${sid}${
+          oem ? ` · ${oem}` : ""
+        }${cluster ? ` · ${cluster}` : ""}`;
+        setLog((prev) => [...prev.slice(-120), line]);
+        if (typeof msg.metrics.decode_count === "number") {
+          setDecodeCount(msg.metrics.decode_count);
+        }
+        void refresh().catch(() => undefined);
+      }
+      if (msg.message === "tpms_passage" && msg.metrics) {
+        const labelP = String(msg.metrics.label ?? "passage");
+        const makeP = String(msg.metrics.make ?? "");
+        setLog((prev) => [
+          ...prev.slice(-120),
+          `${new Date().toLocaleTimeString()} · PASSAGE ${labelP}${makeP ? ` · ${makeP}` : ""}`,
+        ]);
+        void refresh().catch(() => undefined);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [telemetrySeq, lastTelemetry]);
 
   const selectSensor = (s: SensorRow) => {
     setSelectedId(s.sensor_id);

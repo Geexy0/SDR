@@ -67,6 +67,7 @@ class RfEngine:
             )
         else:
             chirp_path = await self._build_chirp(req)
+            self.arbiter.track_shm_artifact(chirp_path)
             status = await self.arbiter.start_tx_file(
                 filepath=chirp_path,
                 frequency_hz=req.frequency_hz,

@@ -207,6 +207,7 @@ class DecoderSession:
     async def start(self) -> str:
         if self.running:
             raise RuntimeError(f"{self.kind} already running")
+        self.arbiter.assert_sdr_idle(excluding="decoder")
         await self.arbiter.cancel_watchdog()
         async with self.arbiter.lock:
             await self.arbiter.refresh_detection()

@@ -42,6 +42,7 @@ export function HardwareHeader() {
   const setWaterfallLut = useHardwareStore((s) => s.setWaterfallLut);
   const setBfProgress = useHardwareStore((s) => s.setBfProgress);
   const setToast = useHardwareStore((s) => s.setToast);
+  const pushTelemetry = useHardwareStore((s) => s.pushTelemetry);
   const [headerCtcss, setHeaderCtcss] = useState<number | null>(null);
   const [headerListenMhz, setHeaderListenMhz] = useState<number | null>(null);
 
@@ -95,6 +96,7 @@ export function HardwareHeader() {
   }, [killTx]);
 
   useEffect(() => {
+    // Single shared /ws/telemetry socket for the SPA (Recon/TPMS read from Zustand).
     const ws = new WebSocket(wsUrl("/ws/telemetry"));
     ws.onmessage = (ev) => {
       try {
@@ -104,9 +106,7 @@ export function HardwareHeader() {
           message?: string;
           metrics?: Record<string, unknown>;
         };
-        if (msg.state) {
-          useHardwareStore.setState({ hwState: msg.state, backendOnline: true });
-        }
+        pushTelemetry(msg);
         if (msg.message === "bruteforce_progress" && msg.metrics) {
           const key = msg.metrics.current_key;
           const eta = Number(msg.metrics.eta_s ?? 0);
@@ -137,7 +137,7 @@ export function HardwareHeader() {
       }
     };
     return () => ws.close();
-  }, [setBfProgress]);
+  }, [setBfProgress, pushTelemetry]);
 
   useEffect(() => {
     if (!toast) return;

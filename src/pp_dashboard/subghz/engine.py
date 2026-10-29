@@ -154,6 +154,7 @@ class SubGhzEngine:
             )
         )
 
+        self.arbiter.track_shm_artifact(synth.path)
         status = await self.arbiter.start_tx_file(
             filepath=synth.path,
             frequency_hz=req.frequency_hz,

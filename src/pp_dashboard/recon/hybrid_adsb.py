@@ -117,6 +117,7 @@ class SoftModesSSession:
         hackrf = shutil.which("hackrf_transfer")
         if not hackrf:
             raise FileNotFoundError("hackrf_transfer not found on PATH")
+        self.arbiter.assert_sdr_idle(excluding="decoder")
         await self.arbiter.cancel_watchdog()
         async with self.arbiter.lock:
             await self.arbiter.refresh_detection()

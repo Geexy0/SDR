@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from pp_dashboard.api.ws_origin import accept_local_ws
 from pp_dashboard.hardware.arbiter import get_arbiter
 from pp_dashboard.recon.engine import get_recon_engine
 
@@ -26,10 +27,12 @@ _HEADER_LEN = 4 + _HDR.size  # 36
 
 @router.websocket("/ws/waterfall")
 async def waterfall_ws(websocket: WebSocket) -> None:
-    await websocket.accept()
+    if not await accept_local_ws(websocket):
+        return
     engine = await get_recon_engine()
     arbiter = await get_arbiter()
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=64)
+    subscribed = False
 
     async def _handler(payload: dict[str, Any]) -> None:
         try:
@@ -44,21 +47,35 @@ async def waterfall_ws(websocket: WebSocket) -> None:
             except asyncio.QueueFull:
                 pass
 
-    session = engine.waterfall
-    mux = getattr(arbiter, "multiplexer", None)
-    if session:
-        session.subscribe(_handler)
-    if mux is not None:
-        mux.subscribe(_handler)
+    def _attach() -> None:
+        nonlocal subscribed
+        if subscribed:
+            return
+        session = engine.waterfall
+        mux = getattr(arbiter, "multiplexer", None)
+        if session:
+            session.subscribe(_handler)
+        if mux is not None:
+            mux.subscribe(_handler)
+        subscribed = True
+
+    _attach()
 
     await websocket.send_json(
         {
             "type": "status",
             "message": "subscribed",
             "waterfall_running": bool(
-                (session and session.running) or (mux is not None and getattr(mux, "running", False))
+                (engine.waterfall and engine.waterfall.running)
+                or (
+                    getattr(arbiter, "multiplexer", None) is not None
+                    and getattr(arbiter.multiplexer, "running", False)
+                )
             ),
-            "multiplex_rx": bool(mux is not None and getattr(mux, "running", False)),
+            "multiplex_rx": bool(
+                getattr(arbiter, "multiplexer", None) is not None
+                and getattr(arbiter.multiplexer, "running", False)
+            ),
         }
     )
 
@@ -72,11 +89,16 @@ async def waterfall_ws(websocket: WebSocket) -> None:
             if text in {"stop", "close"}:
                 break
             if text == "attach":
-                if engine.waterfall:
-                    engine.waterfall.subscribe(_handler)
-                mux2 = getattr(arbiter, "multiplexer", None)
-                if mux2 is not None:
-                    mux2.subscribe(_handler)
+                # Idempotent: never stack duplicate handlers on repeated attach.
+                if not subscribed:
+                    _attach()
+                else:
+                    # Re-bind if session/mux appeared after first subscribe.
+                    if engine.waterfall:
+                        engine.waterfall.subscribe(_handler)
+                    mux2 = getattr(arbiter, "multiplexer", None)
+                    if mux2 is not None:
+                        mux2.subscribe(_handler)
                 await websocket.send_json({"type": "status", "message": "attached"})
     except WebSocketDisconnect:
         log.info("waterfall ws disconnected")

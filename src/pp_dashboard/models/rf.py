@@ -153,8 +153,11 @@ class ReplayRequest(RfBase):
 
     @model_validator(mode="after")
     def require_watchdog_when_loop(self) -> ReplayRequest:
-        if self.loop and self.max_duration_sec is None:
-            self.max_duration_sec = 60.0
+        if self.loop:
+            dur = 60.0 if self.max_duration_sec is None else float(self.max_duration_sec)
+            if dur <= 0:
+                raise ValueError("max_duration_sec must be > 0 when loop=True")
+            self.max_duration_sec = min(dur, 60.0)
         return self
 
 

@@ -7,6 +7,7 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from pp_dashboard.api.ws_origin import accept_local_ws
 from pp_dashboard.recon.audio_hub import AudioHub
 
 log = logging.getLogger(__name__)
@@ -15,7 +16,8 @@ router = APIRouter(tags=["audio"])
 
 @router.websocket("/ws/audio")
 async def audio_ws(websocket: WebSocket) -> None:
-    await websocket.accept()
+    if not await accept_local_ws(websocket):
+        return
     hub = AudioHub.get()
     queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=64)
     meta_queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=16)
