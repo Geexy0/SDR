@@ -53,6 +53,33 @@ class AnalyzeRequest(BaseModel):
         return resolved
 
 
+class WorkbenchDemodRequest(BaseModel):
+    """Offline Packet Workbench demod — file sample rates may be below live HackRF mins."""
+
+    filepath: Path
+    sample_rate: int = Field(2_000_000, ge=10_000, le=SAMPLE_RATE_MAX)
+    modulation: Literal["AUTO", "OOK", "2FSK", "GFSK", "BPSK"] = "AUTO"
+    line_code: Literal[
+        "NRZ",
+        "NRZ_INV",
+        "MANCHESTER_IEEE",
+        "MANCHESTER_THOMAS",
+        "DIFF_MANCHESTER",
+        "PWM",
+    ] = "NRZ"
+    baud_override: float | None = Field(default=None, gt=0, le=1_000_000)
+
+    @field_validator("filepath")
+    @classmethod
+    def validate_path(cls, value: Path) -> Path:
+        resolved = _ensure_under_captures(value)
+        if not resolved.exists():
+            raise ValueError(f"missing file: {resolved}")
+        if resolved.suffix.lower() not in {".cs8", ".c8"}:
+            raise ValueError("workbench expects .cs8/.c8")
+        return resolved
+
+
 class BruteforceRequest(BaseModel):
     mode: Literal["framed", "de_bruijn"]
     frequency_hz: int = Field(..., ge=FREQ_MIN_HZ, le=FREQ_MAX_HZ)

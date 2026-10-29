@@ -17,9 +17,11 @@ from pp_dashboard.models.subghz import (
     ReplayPacketRequest,
     SniffRequest,
     SubConvertRequest,
+    WorkbenchDemodRequest,
 )
 from pp_dashboard.security.tx_gate import TxGateError, assert_tx_allowed
 from pp_dashboard.subghz.engine import SubGhzEngine, get_subghz_engine
+from pp_dashboard.subghz.workbench import demodulate_file, result_to_dict
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/subghz", tags=["subghz"])
@@ -54,6 +56,24 @@ async def analyze(
     body: AnalyzeRequest, engine: SubGhzEngine = Depends(engine_dep)
 ) -> dict:
     return await _run(engine.analyze(body))
+
+
+@router.post("/workbench/demod")
+async def workbench_demod(body: WorkbenchDemodRequest) -> dict:
+    """Blind baud / bit-slicer Packet Workbench (receive-only, offline IQ)."""
+    import asyncio
+
+    def _run_demod() -> dict:
+        result = demodulate_file(
+            body.filepath,
+            sample_rate=body.sample_rate,
+            modulation=body.modulation,
+            line_code=body.line_code,
+            baud_override=body.baud_override,
+        )
+        return result_to_dict(result)
+
+    return await _run(asyncio.to_thread(_run_demod))
 
 
 @router.post("/bruteforce")
