@@ -1,13 +1,21 @@
-import { AudioWaveform, CircleDot, RadioTower, SatelliteDish } from "lucide-react";
+import {
+  AudioWaveform,
+  Binary,
+  CircleDot,
+  RadioTower,
+  SatelliteDish,
+} from "lucide-react";
 import type { WorkspaceTab } from "@/lib/types";
 import { useHardwareStore } from "@/store/useHardwareStore";
 import { ActiveTxDeck } from "./ActiveTxDeck";
+import { PacketWorkbench } from "./PacketWorkbench";
 import { ReconSpoofDeck } from "./ReconSpoofDeck";
 import { SubGhzDeck } from "./SubGhzDeck";
 import { TpmsFleetDeck } from "./TpmsFleetDeck";
 
 const TABS: { id: WorkspaceTab; label: string; icon: typeof AudioWaveform }[] = [
   { id: "subghz", label: "Sub-GHz OOK", icon: AudioWaveform },
+  { id: "workbench", label: "Packet Workbench", icon: Binary },
   { id: "tpms", label: "TPMS Spy", icon: CircleDot },
   { id: "tx", label: "Active TX / Rolljam", icon: RadioTower },
   { id: "recon", label: "Recon / Spoof", icon: SatelliteDish },
@@ -38,6 +46,7 @@ export function WorkspaceTabs() {
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
         {tab === "subghz" && <SubGhzDeck />}
+        {tab === "workbench" && <PacketWorkbench />}
         {tab === "tpms" && <TpmsFleetDeck />}
         {tab === "tx" && <ActiveTxDeck />}
         {tab === "recon" && <ReconSpoofDeck />}

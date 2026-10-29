@@ -7,7 +7,54 @@ export type HardwareState =
   | "MULTIPLEX_RX"
   | "SWITCHING";
 
-export type WorkspaceTab = "subghz" | "tx" | "recon" | "tpms";
+export type WorkspaceTab = "subghz" | "workbench" | "tx" | "recon" | "tpms";
+
+export type WorkbenchModulation = "AUTO" | "OOK" | "2FSK" | "GFSK" | "BPSK";
+export type WorkbenchLineCode =
+  | "NRZ"
+  | "NRZ_INV"
+  | "MANCHESTER_IEEE"
+  | "MANCHESTER_THOMAS"
+  | "DIFF_MANCHESTER"
+  | "PWM";
+export type WorkbenchColumnClass =
+  | "static"
+  | "incrementing"
+  | "high_entropy"
+  | "mixed";
+
+export interface WorkbenchPacketRow {
+  bit_offset: number;
+  sync_bits: string;
+  sync_hex: string;
+  payload_bits: string;
+  payload_hex: string;
+  payload_bytes: number[];
+  hamming: number;
+}
+
+export interface WorkbenchCrcMatch {
+  name: string;
+  ok: boolean;
+  payload_len: number;
+  expect: string;
+  got: string;
+}
+
+export interface WorkbenchDemodResult {
+  modulation: WorkbenchModulation;
+  line_code: WorkbenchLineCode;
+  sample_rate: number;
+  baud_est: number;
+  samples_per_symbol: number;
+  bits: string;
+  bits_inv: string;
+  sync_word: string | null;
+  packets: WorkbenchPacketRow[];
+  column_classes: WorkbenchColumnClass[];
+  crc_matches: WorkbenchCrcMatch[];
+  notes: string;
+}
 
 export type WaterfallLut = "inferno" | "viridis" | "phosphor" | "gqrx";
 

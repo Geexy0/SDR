@@ -1,4 +1,9 @@
-import type { AnalyzeResult, HardwareStatus, SubGhzPacket } from "./types";
+import type {
+  AnalyzeResult,
+  HardwareStatus,
+  SubGhzPacket,
+  WorkbenchDemodResult,
+} from "./types";
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
@@ -32,6 +37,75 @@ export type VoiceRecordingRow = {
   ctcss_hz: number | null;
   duration_sec: number;
   filepath: string;
+  lat?: number | null;
+  lon?: number | null;
+};
+
+export type GeolocOperator = {
+  lat: number;
+  lon: number;
+  accuracy_m?: number | null;
+  alt_m?: number | null;
+  source?: string | null;
+  updated_at?: string;
+};
+
+export type HeatCell = {
+  cell_lat: number;
+  cell_lon: number;
+  hit_count: number;
+  avg_rssi_db: number | null;
+  peak_rssi_db: number | null;
+};
+
+export type LobRow = {
+  id: number;
+  lat: number;
+  lon: number;
+  bearing_deg: number;
+  label?: string | null;
+  ray: [number, number][];
+};
+
+export type MissionTemplate = {
+  id: string;
+  name: string;
+  description?: string;
+  sync_freqman_sd?: boolean;
+  steps: Record<string, unknown>[];
+};
+
+export type MissionFinding = {
+  id: number;
+  mission_id: number;
+  frequency_hz: number;
+  peak_rssi_db: number | null;
+  modulation: string | null;
+  baud_est: number | null;
+  cs8_path: string | null;
+  wav_path: string | null;
+  notes?: string | null;
+};
+
+export type MissionStatus = {
+  ok: boolean;
+  state: string;
+  running: boolean;
+  mission_id: number | null;
+  name: string;
+  step_index: number;
+  step_total: number;
+  step_type: string | null;
+  error: string | null;
+  ranked_peaks?: { frequency_hz: number; peak_rssi_db: number }[];
+  report: {
+    mission_id: number;
+    name: string | null;
+    template_id: string | null;
+    state: string | null;
+    finding_count: number;
+    findings: MissionFinding[];
+  } | null;
 };
 
 export const api = {
@@ -70,6 +144,11 @@ export const api = {
     ),
   analyze: (body: Record<string, unknown>) =>
     req<AnalyzeResult>("/api/subghz/analyze", { method: "POST", body: JSON.stringify(body) }),
+  workbenchDemod: (body: Record<string, unknown>) =>
+    req<WorkbenchDemodResult>("/api/subghz/workbench/demod", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   bruteforce: (body: Record<string, unknown>) =>
     req("/api/subghz/bruteforce", { method: "POST", body: JSON.stringify(body) }),
   bruteforceStop: () =>
@@ -101,6 +180,75 @@ export const api = {
   voiceRecordings: (limit = 40) =>
     req<{ recordings: VoiceRecordingRow[] }>(`/api/recon/recordings?limit=${limit}`),
   voiceRecordingAudioUrl: (id: number) => `/api/recon/recordings/${id}/audio`,
+
+  missionTemplates: () =>
+    req<{ templates: MissionTemplate[] }>("/api/recon/mission/templates"),
+  missionStatus: () => req<MissionStatus>("/api/recon/mission"),
+  startMission: (body: Record<string, unknown>) =>
+    req<MissionStatus>("/api/recon/mission", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  stopMission: () =>
+    req<MissionStatus>("/api/recon/mission/stop", { method: "POST" }),
+
+  geolocStatus: () =>
+    req<{
+      ok: boolean;
+      operator: GeolocOperator | null;
+      breadcrumb_count: number;
+      lob_count: number;
+      gnss_latest: Record<string, unknown> | null;
+    }>("/api/geoloc/status"),
+  setOperatorGps: (body: {
+    lat: number;
+    lon: number;
+    accuracy_m?: number;
+    alt_m?: number;
+    source?: string;
+  }) =>
+    req<{ ok: boolean; operator: GeolocOperator }>("/api/geoloc/operator", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  geolocHeatmap: (cellDeg = 0.002) =>
+    req<{ cells: HeatCell[] }>(`/api/geoloc/heatmap?cell_deg=${cellDeg}`),
+  geolocBreadcrumbs: (limit = 500) =>
+    req<{ breadcrumbs: Record<string, unknown>[] }>(
+      `/api/geoloc/breadcrumbs?limit=${limit}`,
+    ),
+  addBreadcrumb: (body: Record<string, unknown>) =>
+    req<{ ok: boolean; id: number }>("/api/geoloc/breadcrumb", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  addLob: (body: Record<string, unknown>) =>
+    req<{ ok: boolean; id: number; ray: [number, number][] }>("/api/geoloc/lob", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  listLobs: () => req<{ lobs: LobRow[] }>("/api/geoloc/lobs"),
+  clearLobs: () => req<{ ok: boolean }>("/api/geoloc/lobs", { method: "DELETE" }),
+  intersectLobs: (body: Record<string, unknown>) =>
+    req<{ ok: boolean; intersection: { lat: number; lon: number } | null }>(
+      "/api/geoloc/lob/intersect",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  rangeRings: (radii = "1000,5000,15000") =>
+    req<{
+      ok: boolean;
+      operator: GeolocOperator;
+      rings: { radius_m: number; polygon: [number, number][] }[];
+    }>(`/api/geoloc/range-rings?radii_m=${encodeURIComponent(radii)}`),
+  gnssL1Sample: (body: Record<string, unknown> = {}) =>
+    req<Record<string, unknown>>("/api/geoloc/gnss/l1-sample", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  gnssSamples: (limit = 20) =>
+    req<{ samples: Record<string, unknown>[] }>(
+      `/api/geoloc/gnss/samples?limit=${limit}`,
+    ),
 
   tpmsStatus: () => req<Record<string, unknown>>("/api/tpms/status"),
   tpmsListen: (body: Record<string, unknown>) =>

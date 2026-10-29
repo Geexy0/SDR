@@ -87,7 +87,8 @@ _HOME_HTML = f"""<!DOCTYPE html>
 <body>
   <main>
     <h1 class="brand">PortaPack H4M · HackRF Pro</h1>
-    <p class="sub">Phase 1–5 control plane — arbiter, RF, Mayhem, Sub-GHz, wideband waterfall / recon / lab spoof.
+    <p class="sub">v0.7.0 Cyber-Deck — arbiter, RF, Mayhem, Sub-GHz workbench, mission recon, geoloc/DF, TPMS, gated TX.
+      Prefer the React SPA at <code>/</code> when <code>frontend/dist</code> is built.
       Sweep &amp; TX need <code>HACKRF_NATIVE</code>; screen mirror needs <code>MAYHEM_SERIAL</code>.</p>
 
     <div class="grid">

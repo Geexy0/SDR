@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import L from "leaflet";
-import { api, type VoiceRecordingRow } from "@/lib/api";
+import { api, type GeolocOperator, type HeatCell, type LobRow, type VoiceRecordingRow } from "@/lib/api";
+import { closestPointOfApproach, formatRange, haversineM } from "@/lib/geoMath";
 import { useHardwareStore } from "@/store/useHardwareStore";
+import { LocationIntelPanel } from "./LocationIntelPanel";
+import { MissionControlDrawer } from "./MissionControlDrawer";
 import { CtcssPill, WebAudioPlayer } from "./WebAudioPlayer";
 
 type TrackMode = "idle" | "adsb" | "ais";
@@ -13,9 +16,14 @@ export function ReconSpoofDeck() {
   const aircraftLayer = useRef<L.LayerGroup | null>(null);
   const vesselLayer = useRef<L.LayerGroup | null>(null);
   const rangeLayer = useRef<L.Polygon | null>(null);
+  const heatLayer = useRef<L.LayerGroup | null>(null);
+  const lobLayer = useRef<L.LayerGroup | null>(null);
+  const ringLayer = useRef<L.LayerGroup | null>(null);
+  const operatorLayer = useRef<L.LayerGroup | null>(null);
   const aircraftMarkers = useRef<Map<string, L.CircleMarker>>(new Map());
   const vesselMarkers = useRef<Map<string, L.CircleMarker>>(new Map());
   const aircraftSource = useRef<Map<string, string>>(new Map());
+  const operatorRef = useRef<GeolocOperator | null>(null);
 
   const pocsagLines = useHardwareStore((s) => s.pocsagLines);
   const pushPocsag = useHardwareStore((s) => s.pushPocsag);
@@ -85,10 +93,24 @@ export function ReconSpoofDeck() {
     color: string,
     onCount: (n: number) => void,
     source?: string,
+    speedMps?: number,
+    courseDeg?: number,
   ) => {
     if (!layer || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
     const style = trackColor(source, color);
-    const tip = source ? `${label} · ${source}` : label;
+    const op = operatorRef.current;
+    let tip = source ? `${label} · ${source}` : label;
+    if (op) {
+      const rng = haversineM(op.lat, op.lon, lat, lon);
+      tip += ` · ${formatRange(rng)}`;
+      if (speedMps != null && speedMps > 0) {
+        const cpa = closestPointOfApproach(
+          { lat: op.lat, lon: op.lon, speed_mps: 0, course_deg: 0 },
+          { lat, lon, speed_mps: speedMps, course_deg: courseDeg ?? 0 },
+        );
+        tip += ` · CPA ${formatRange(cpa.range_m)} @ ${Math.round(cpa.time_s)}s`;
+      }
+    }
     const existing = markers.get(id);
     if (existing) {
       existing.setLatLng([lat, lon]);
@@ -117,6 +139,122 @@ export function ReconSpoofDeck() {
     onCount(markers.size);
   };
 
+  const applyLocationLayers = useCallback(
+    (layers: {
+      heatmap: HeatCell[];
+      lobs: LobRow[];
+      rings: { radius_m: number; polygon: [number, number][] }[];
+      intersection: { lat: number; lon: number } | null;
+      operator: GeolocOperator | null;
+      showHeat: boolean;
+      showRings: boolean;
+      showLobs: boolean;
+      showWifiCell: boolean;
+    }) => {
+      operatorRef.current = layers.operator;
+      const map = mapRef.current;
+      if (!map) return;
+      if (!heatLayer.current) heatLayer.current = L.layerGroup().addTo(map);
+      if (!lobLayer.current) lobLayer.current = L.layerGroup().addTo(map);
+      if (!ringLayer.current) ringLayer.current = L.layerGroup().addTo(map);
+      if (!operatorLayer.current) operatorLayer.current = L.layerGroup().addTo(map);
+
+      heatLayer.current.clearLayers();
+      if (layers.showHeat) {
+        for (const c of layers.heatmap) {
+          const r = Math.min(18, 4 + Math.sqrt(c.hit_count) * 3);
+          L.circleMarker([c.cell_lat, c.cell_lon], {
+            radius: r,
+            color: "#f97316",
+            fillColor: "#ea580c",
+            fillOpacity: Math.min(0.55, 0.15 + c.hit_count * 0.08),
+            weight: 1,
+          })
+            .bindTooltip(
+              `hits ${c.hit_count}` +
+                (c.peak_rssi_db != null ? ` · peak ${c.peak_rssi_db.toFixed(1)} dB` : ""),
+            )
+            .addTo(heatLayer.current);
+        }
+      }
+
+      lobLayer.current.clearLayers();
+      if (layers.showLobs) {
+        for (const lob of layers.lobs) {
+          const latlngs = (lob.ray ?? []).map(([la, lo]) => L.latLng(la, lo));
+          if (latlngs.length >= 2) {
+            L.polyline(latlngs, {
+              color: "#22d3ee",
+              weight: 2,
+              dashArray: "4 6",
+              opacity: 0.85,
+            })
+              .bindTooltip(lob.label || `${lob.bearing_deg.toFixed(0)}°`)
+              .addTo(lobLayer.current);
+          }
+          L.circleMarker([lob.lat, lob.lon], {
+            radius: 4,
+            color: "#67e8f9",
+            fillColor: "#0891b2",
+            fillOpacity: 0.9,
+          }).addTo(lobLayer.current);
+        }
+        if (layers.intersection) {
+          L.circleMarker([layers.intersection.lat, layers.intersection.lon], {
+            radius: 8,
+            color: "#f472b6",
+            fillColor: "#db2777",
+            fillOpacity: 0.9,
+            weight: 2,
+          })
+            .bindTooltip("LOB intersection", { permanent: true, direction: "top" })
+            .addTo(lobLayer.current);
+        }
+      }
+
+      ringLayer.current.clearLayers();
+      if (layers.showRings) {
+        for (const ring of layers.rings) {
+          const latlngs = ring.polygon.map(([la, lo]) => L.latLng(la, lo));
+          L.polygon(latlngs, {
+            color: "#fbbf24",
+            weight: 1,
+            dashArray: "2 8",
+            fillOpacity: 0.03,
+          })
+            .bindTooltip(`${(ring.radius_m / 1000).toFixed(1)} km`)
+            .addTo(ringLayer.current);
+        }
+      }
+
+      operatorLayer.current.clearLayers();
+      if (layers.operator) {
+        L.circleMarker([layers.operator.lat, layers.operator.lon], {
+          radius: 7,
+          color: "#fde68a",
+          fillColor: "#f59e0b",
+          fillOpacity: 0.95,
+          weight: 2,
+        })
+          .bindTooltip("Operator", { permanent: false })
+          .addTo(operatorLayer.current);
+        if (layers.showWifiCell && layers.operator.accuracy_m != null) {
+          L.circle([layers.operator.lat, layers.operator.lon], {
+            radius: Math.max(25, layers.operator.accuracy_m),
+            color: "#a78bfa",
+            weight: 1,
+            dashArray: "3 5",
+            fillColor: "#7c3aed",
+            fillOpacity: 0.08,
+          })
+            .bindTooltip("Browser Wi‑Fi/cell accuracy")
+            .addTo(operatorLayer.current);
+        }
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
     const host = mapHostRef.current;
     if (!host || mapRef.current) return;
@@ -137,15 +275,19 @@ export function ReconSpoofDeck() {
     ).addTo(map);
     aircraftLayer.current = L.layerGroup().addTo(map);
     vesselLayer.current = L.layerGroup().addTo(map);
-    // RX site pin (Normandy lab default)
+    heatLayer.current = L.layerGroup().addTo(map);
+    lobLayer.current = L.layerGroup().addTo(map);
+    ringLayer.current = L.layerGroup().addTo(map);
+    operatorLayer.current = L.layerGroup().addTo(map);
+    // Legacy lab pin (operator GPS supersedes when available)
     L.circleMarker([49.1182, -1.0972], {
-      radius: 6,
-      color: "#fbbf24",
-      fillColor: "#f59e0b",
-      fillOpacity: 0.9,
-      weight: 2,
+      radius: 5,
+      color: "#64748b",
+      fillColor: "#475569",
+      fillOpacity: 0.7,
+      weight: 1,
     })
-      .bindTooltip("RX site", { permanent: false })
+      .bindTooltip("Lab default", { permanent: false })
       .addTo(map);
     map.on("click", (e: L.LeafletMouseEvent) => {
       useHardwareStore.getState().setSpoofPin({ lat: e.latlng.lat, lon: e.latlng.lng });
@@ -284,6 +426,18 @@ export function ReconSpoofDeck() {
         const call = String(msg.metrics?.callsign ?? (icao || "AC")).trim();
         const source = String(msg.metrics?.source ?? "");
         const id = icao || `${lat.toFixed(3)},${lon.toFixed(3)}`;
+        const speed =
+          typeof msg.metrics?.speed_mps === "number"
+            ? msg.metrics.speed_mps
+            : typeof msg.metrics?.gs === "number"
+              ? Number(msg.metrics.gs) * 0.514444
+              : undefined;
+        const course =
+          typeof msg.metrics?.track === "number"
+            ? Number(msg.metrics.track)
+            : typeof msg.metrics?.course_deg === "number"
+              ? Number(msg.metrics.course_deg)
+              : undefined;
         upsertTrack(
           aircraftLayer.current,
           aircraftMarkers.current,
@@ -294,6 +448,8 @@ export function ReconSpoofDeck() {
           "#22d3ee",
           setAircraftCount,
           source,
+          speed,
+          course,
         );
       }
       if (msg.message === "ais") {
@@ -302,6 +458,18 @@ export function ReconSpoofDeck() {
         const mmsi = String(msg.metrics?.mmsi ?? "");
         const name = String(msg.metrics?.name ?? (mmsi || "VES"));
         const id = mmsi || `${lat.toFixed(3)},${lon.toFixed(3)}`;
+        const speed =
+          typeof msg.metrics?.speed_mps === "number"
+            ? msg.metrics.speed_mps
+            : typeof msg.metrics?.sog === "number"
+              ? Number(msg.metrics.sog) * 0.514444
+              : undefined;
+        const course =
+          typeof msg.metrics?.cog === "number"
+            ? Number(msg.metrics.cog)
+            : typeof msg.metrics?.course_deg === "number"
+              ? Number(msg.metrics.course_deg)
+              : undefined;
         upsertTrack(
           vesselLayer.current,
           vesselMarkers.current,
@@ -311,6 +479,9 @@ export function ReconSpoofDeck() {
           name,
           "#34d399",
           setVesselCount,
+          undefined,
+          speed,
+          course,
         );
       }
     } catch {
@@ -505,10 +676,13 @@ export function ReconSpoofDeck() {
       </section>
 
       <section className="panel flex min-h-[280px] flex-col overflow-hidden rounded lg:min-h-0">
+        <div className="border-b border-slate-800 px-2 pt-2">
+          <LocationIntelPanel onLayersChange={applyLocationLayers} />
+        </div>
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-1 border-b border-slate-800 px-2 py-1">
           <div className="flex items-center gap-2">
             <h3 className="text-[10px] uppercase tracking-wider text-slate-400">
-              Live Map · Aircraft + Boats
+              Live Map · Aircraft + Boats · DF
             </h3>
             <span className="text-[9px] text-cyan-400/90">AC {aircraftCount}</span>
             <span className="text-[9px] text-emerald-400/90">VES {vesselCount}</span>
@@ -603,6 +777,8 @@ export function ReconSpoofDeck() {
           </span>
         </div>
       </section>
+
+      <MissionControlDrawer />
 
       <section className="panel col-span-full rounded p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
