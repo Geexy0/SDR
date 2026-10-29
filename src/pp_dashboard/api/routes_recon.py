@@ -5,17 +5,23 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable
 from pathlib import Path
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 
 from pp_dashboard.models.recon import (
     DecoderStartRequest,
+    MissionStartRequest,
     SweepStartRequest,
     VoiceReconStartRequest,
 )
 from pp_dashboard.recon.engine import ReconEngine, get_recon_engine
+from pp_dashboard.recon.scheduler import (
+    MISSION_TEMPLATES,
+    MissionScheduler,
+    get_mission_scheduler,
+)
 from pp_dashboard.security.tx_gate import TxGateError, assert_tx_allowed
 
 log = logging.getLogger(__name__)
@@ -25,6 +31,10 @@ T = TypeVar("T")
 
 async def engine_dep() -> ReconEngine:
     return await get_recon_engine()
+
+
+async def mission_dep() -> MissionScheduler:
+    return await get_mission_scheduler()
 
 
 @router.get("/status")
@@ -107,6 +117,31 @@ async def start_voice_recon(
 @router.post("/voice/stop")
 async def stop_voice_recon(engine: ReconEngine = Depends(engine_dep)) -> dict:
     return await engine.stop_voice_recon()
+
+
+@router.get("/mission/templates")
+async def mission_templates() -> dict[str, Any]:
+    return {"templates": MISSION_TEMPLATES}
+
+
+@router.get("/mission")
+async def mission_status(ms: MissionScheduler = Depends(mission_dep)) -> dict[str, Any]:
+    return ms.status()
+
+
+@router.post("/mission")
+async def start_mission(
+    body: MissionStartRequest, ms: MissionScheduler = Depends(mission_dep)
+) -> dict[str, Any]:
+    payload = body.model_dump(exclude_none=True)
+    if body.steps is not None:
+        payload["steps"] = [s.model_dump(exclude_none=True) for s in body.steps]
+    return await _run(ms.start(payload))
+
+
+@router.post("/mission/stop")
+async def stop_mission(ms: MissionScheduler = Depends(mission_dep)) -> dict[str, Any]:
+    return await ms.abort(reason="api_stop")
 
 
 async def _run(coro: Awaitable[T]) -> T:

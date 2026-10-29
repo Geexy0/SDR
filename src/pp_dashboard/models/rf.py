@@ -243,6 +243,7 @@ class TelemetryEvent(BaseModel):
         "process_exit",
         "error",
         "heartbeat",
+        "mission",
     ]
     ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     state: HardwareState | None = None

@@ -125,6 +125,53 @@ class SynthesizeRequest(BaseModel):
         return resolved
 
 
+class MissionStep(BaseModel):
+    """One step in an autonomous recon mission pipeline."""
+
+    type: Literal[
+        "STEP_SWEEP_RANK",
+        "STEP_BURST_CAPTURE",
+        "STEP_AUTO_ANALYZE",
+        "STEP_FREQMAN_EXPORT",
+    ]
+    f_start_hz: int | None = Field(default=None, ge=FREQ_MIN_HZ, le=FREQ_MAX_HZ)
+    f_stop_hz: int | None = Field(default=None, ge=FREQ_MIN_HZ, le=FREQ_MAX_HZ)
+    duration_sec: float | None = Field(default=None, gt=0, le=120)
+    top_k: int | None = Field(default=None, ge=1, le=64)
+    threshold_db: float | None = Field(default=None, ge=-120, le=0)
+    bin_width_hz: int | None = Field(default=None, ge=2445, le=5_000_000)
+    sample_rate: int | None = Field(default=None, ge=2_000_000, le=20_000_000)
+    lna: int | None = None
+    vga: int | None = None
+    category: str | None = Field(default=None, max_length=24)
+    sync_sd: bool | None = None
+
+    @field_validator("lna")
+    @classmethod
+    def v_lna(cls, v: int | None) -> int | None:
+        return None if v is None else _require_lna(v)
+
+    @field_validator("vga")
+    @classmethod
+    def v_vga(cls, v: int | None) -> int | None:
+        return None if v is None else _require_rx_vga(v)
+
+
+class MissionStartRequest(BaseModel):
+    """Start a multi-step RX recon mission (template and/or explicit steps)."""
+
+    name: str | None = Field(default=None, max_length=120)
+    template_id: str | None = Field(default=None, max_length=64)
+    sync_freqman_sd: bool = False
+    steps: list[MissionStep] | None = None
+
+    @model_validator(mode="after")
+    def require_steps_or_template(self) -> MissionStartRequest:
+        if not self.template_id and not self.steps:
+            raise ValueError("provide template_id or steps")
+        return self
+
+
 class ReconStatus(BaseModel):
     waterfall_running: bool
     decoder_kind: str | None = None

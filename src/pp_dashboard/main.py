@@ -40,10 +40,13 @@ log = logging.getLogger("pp_dashboard")
 async def _wire_sdr_busy_registry(arbiter: Any) -> None:
     """Register recon / Sub-GHz busy checks + stop callbacks on the arbiter."""
     from pp_dashboard.recon.engine import get_recon_engine
+    from pp_dashboard.recon.scheduler import MissionScheduler
     from pp_dashboard.subghz.engine import get_subghz_engine
 
     recon = await get_recon_engine()
     subghz = await get_subghz_engine()
+    mission = await MissionScheduler.get_instance(arbiter=arbiter)
+    mission.wire_arbiter(arbiter)
 
     arbiter.register_busy_check(
         "waterfall",
