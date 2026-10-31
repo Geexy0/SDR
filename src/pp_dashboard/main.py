@@ -137,8 +137,8 @@ def create_app() -> FastAPI:
         title="PortaPack H4M / HackRF Pro Dashboard",
         version=__version__,
         description=(
-            "v0.7.0 Cyber-Deck — Arbiter, RF, Mayhem, Sub-GHz Workbench, "
-            "Recon missions, Geoloc/DF, Voice/TPMS, gated TX"
+            "v0.8.0 Cyber-Deck — Arbiter, RF, Mayhem, Sub-GHz Workbench, "
+            "Recon missions, Geoloc WLS/RSSI solvers, Voice/TPMS, gated TX"
         ),
         lifespan=lifespan,
     )

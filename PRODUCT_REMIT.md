@@ -12,6 +12,7 @@ Open, receive-first work. No lab allow-list required:
 - ISM / Sub-GHz RX: `rtl_433` sniff, pulse analyze, Packet Workbench (baud/mod tag), TPMS sensor ID mapping & fleet tagging UI
 - Autonomous RX Mission Scheduler (sweep → burst capture → analyze → FREQMAN export)
 - Operator GPS / RF breadcrumbs / LOB DF / range rings / track CPA / GNSS L1 RX interference sample (receive-only geoloc)
+- Probabilistic emitter localization (Stansfield WLS multi-LOB + RSSI path-loss grid ML; RX math only)
 - FREQMAN / Looking Glass style lists (aviation, marine, amateur, PMR/LPD, ISM)
 - Mayhem serial helpers, SD deploy, official Mayhem SD content
 - Defensive / awareness documentation for public RF formats
