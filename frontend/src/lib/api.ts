@@ -67,6 +67,103 @@ export type LobRow = {
   ray: [number, number][];
 };
 
+export type Cep95Ellipse = {
+  semi_major_m: number;
+  semi_minor_m: number;
+  orientation_deg: number;
+  polygon: [number, number][];
+};
+
+export type LobSolveResult = {
+  ok: boolean;
+  gdop_rejected?: boolean;
+  lat?: number | null;
+  lon?: number | null;
+  cep95?: Cep95Ellipse | null;
+  message?: string;
+  n_obs?: number;
+};
+
+export type PathLossPoint = {
+  distance_m: number;
+  log10_distance: number;
+  rssi_db: number;
+  predicted_db: number;
+  residual_db: number;
+};
+
+export type FoxhuntResult = {
+  status: "warmer" | "colder" | "hold" | string;
+  gradient_score: number;
+  rssi_filtered: number;
+  rssi_rate_db_s: number;
+  travel_bearing_deg: number;
+  arrow: { east_m: number; north_m: number; bearing_deg: number };
+  message?: string;
+};
+
+export type PolarPeakResult = {
+  peak_bearing_deg: number;
+  half_power_beamwidth_deg: number;
+  angular_std_deg: number;
+  peak_rssi_db: number;
+  median_rssi_db: number;
+  n_samples: number;
+};
+
+export type GnssL1AnalyzeResult = {
+  ok?: boolean;
+  classification: string;
+  delta_n0_db?: number;
+  papr_db?: number;
+  spectral_kurtosis?: number;
+  carrier_offset_hz?: number;
+  carrier_peak_db?: number;
+  geo_marker?: {
+    lat: number;
+    lon: number;
+    classification: string;
+    ts: number;
+  } | null;
+  message?: string;
+  filepath?: string;
+};
+
+export type LookAngleResult = {
+  ok?: boolean;
+  azimuth_deg: number;
+  elevation_deg: number;
+  slant_range_m: number;
+  ground_range_m: number;
+  fspl_db: number;
+  horizon_km: number;
+  beyond_horizon: boolean;
+  frequency_hz: number;
+};
+
+export type RadiosondeTrack = {
+  serial_id: string;
+  kind?: string;
+  frequency_hz?: number;
+  trajectory?: { lat: number; lon: number; alt_m: number }[];
+  last?: Record<string, unknown> | null;
+  burst?: { lat: number; lon: number; alt_m: number } | null;
+  landing?: { lat: number; lon: number; alt_m: number } | null;
+};
+
+export type RssiGridSolveResult = {
+  ok: boolean;
+  lat?: number | null;
+  lon?: number | null;
+  p0_db?: number | null;
+  gamma?: number;
+  likelihood_peak?: number;
+  contour_80?: [number, number][];
+  contour_95?: [number, number][];
+  path_loss_curve?: PathLossPoint[];
+  message?: string;
+};
+
 export type MissionTemplate = {
   id: string;
   name: string;
@@ -249,6 +346,56 @@ export const api = {
     req<{ samples: Record<string, unknown>[] }>(
       `/api/geoloc/gnss/samples?limit=${limit}`,
     ),
+  lobSolve: (body: Record<string, unknown>) =>
+    req<LobSolveResult>("/api/geoloc/lob/solve", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  rssiGridSolve: (body: Record<string, unknown>) =>
+    req<RssiGridSolveResult>("/api/geoloc/rssi-grid/solve", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  foxhunt: (body: {
+    samples: { lat: number; lon: number; rssi_db: number; t_mono: number }[];
+    window_sec?: number;
+  }) =>
+    req<FoxhuntResult>("/api/geoloc/foxhunt", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  polarPeak: (body: {
+    samples: { bearing_deg: number; rssi_db: number }[];
+  }) =>
+    req<PolarPeakResult>("/api/geoloc/polar/peak", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  gnssL1Analyze: (body: Record<string, unknown> = {}) =>
+    req<GnssL1AnalyzeResult>("/api/geoloc/gnss/l1-analyze", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  lookAngle: (body: {
+    rx_lat: number;
+    rx_lon: number;
+    rx_alt_m?: number;
+    tx_lat: number;
+    tx_lon: number;
+    tx_alt_m: number;
+    frequency_hz: number;
+  }) =>
+    req<LookAngleResult>("/api/geoloc/look-angle", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  radiosondeTracks: () =>
+    req<{ tracks: RadiosondeTrack[] }>("/api/recon/radiosonde/tracks"),
+  radiosondeInject: (body: Record<string, unknown>) =>
+    req<{ ok: boolean; track: RadiosondeTrack }>("/api/recon/radiosonde/inject", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   tpmsStatus: () => req<Record<string, unknown>>("/api/tpms/status"),
   tpmsListen: (body: Record<string, unknown>) =>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, wsUrl } from "@/lib/api";
+import { parseWf32Frame as parseWf32 } from "@/lib/binaryFrames";
 import { buildLutTexture, type LutName } from "@/lib/luts";
 import { useHardwareStore } from "@/store/useHardwareStore";
 
@@ -40,31 +41,6 @@ function createRing(width: number): RingBuffer {
 }
 
 /** WF32 header is 36 bytes: magic + u32 n + u32 bin_hz + 2×f32 + 2×u64 */
-function parseWf32(buf: ArrayBuffer): {
-  n: number;
-  binHz: number;
-  dbMin: number;
-  dbMax: number;
-  startHz: number;
-  stopHz: number;
-  u8: Uint8Array;
-} | null {
-  if (buf.byteLength < 36) return null;
-  const v = new DataView(buf);
-  const magic =
-    String.fromCharCode(v.getUint8(0), v.getUint8(1), v.getUint8(2), v.getUint8(3));
-  if (magic !== "WF32") return null;
-  const n = v.getUint32(4);
-  if (n <= 0 || buf.byteLength < 36 + n) return null;
-  const binHz = v.getUint32(8);
-  const dbMin = v.getFloat32(12);
-  const dbMax = v.getFloat32(16);
-  const startHz = Number(v.getBigUint64(20));
-  const stopHz = Number(v.getBigUint64(28));
-  const u8 = new Uint8Array(buf, 36, n);
-  return { n, binHz, dbMin, dbMax, startHz, stopHz, u8 };
-}
-
 function u8ToDb(u: number, dbMin: number, dbMax: number): number {
   return dbMin + (u / 255) * (dbMax - dbMin);
 }

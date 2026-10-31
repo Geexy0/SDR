@@ -217,11 +217,21 @@ export function LocationIntelPanel({ onLayersChange }: Props) {
   const sampleGnss = async () => {
     setBusy(true);
     try {
-      const r = await api.gnssL1Sample({ duration_sec: 0.25, lna: 24, vga: 20 });
+      const r = await api.gnssL1Analyze({
+        duration_sec: 0.25,
+        lna: 24,
+        vga: 20,
+        operator_lat: mapLat,
+        operator_lon: mapLon,
+      });
       setGnssNote(
-        `${r.jammed ? "⚠ elevated" : "nominal"} · peak ${Number(r.peak_db).toFixed(1)} dB`,
+        `${r.classification} · ΔN₀ ${Number(r.delta_n0_db ?? 0).toFixed(1)} · PAPR ${Number(r.papr_db ?? 0).toFixed(1)}`,
       );
-      setToast(r.jammed ? "L1 energy elevated (possible interference)" : "L1 sample nominal");
+      setToast(
+        r.classification === "NOMINAL"
+          ? "L1 integrity NOMINAL"
+          : `L1 alert: ${r.classification}`,
+      );
     } catch (err) {
       setToast(err instanceof Error ? err.message : String(err));
     } finally {
@@ -337,7 +347,7 @@ export function LocationIntelPanel({ onLayersChange }: Props) {
           className="rounded border border-violet-800 px-2 py-0.5 text-[10px] text-violet-200 disabled:opacity-40"
           onClick={() => void sampleGnss()}
         >
-          GNSS L1 sample
+          GNSS L1 analyze
         </button>
         <button
           type="button"

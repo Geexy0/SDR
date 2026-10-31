@@ -3,11 +3,25 @@ import L from "leaflet";
 import { api, type GeolocOperator, type HeatCell, type LobRow, type VoiceRecordingRow } from "@/lib/api";
 import { closestPointOfApproach, formatRange, haversineM } from "@/lib/geoMath";
 import { useHardwareStore } from "@/store/useHardwareStore";
-import { LocationIntelPanel } from "./LocationIntelPanel";
+import {
+  LocationIntelDeck,
+  type FoxhuntOverlay,
+  type GnssAlertMarker,
+  type SolverOverlay,
+} from "./LocationIntelDeck";
+import { LookAngleWidget, type LookAngleData } from "./LookAngleWidget";
 import { MissionControlDrawer } from "./MissionControlDrawer";
 import { CtcssPill, WebAudioPlayer } from "./WebAudioPlayer";
 
-type TrackMode = "idle" | "adsb" | "ais";
+type TrackMode = "idle" | "adsb" | "ais" | "radiosonde";
+
+type TrackMeta = {
+  lat: number;
+  lon: number;
+  alt_m: number;
+  frequency_hz: number;
+  label: string;
+};
 
 export function ReconSpoofDeck() {
   const mapHostRef = useRef<HTMLDivElement>(null);
@@ -20,9 +34,15 @@ export function ReconSpoofDeck() {
   const lobLayer = useRef<L.LayerGroup | null>(null);
   const ringLayer = useRef<L.LayerGroup | null>(null);
   const operatorLayer = useRef<L.LayerGroup | null>(null);
+  const solverLayer = useRef<L.LayerGroup | null>(null);
+  const foxhuntLayer = useRef<L.LayerGroup | null>(null);
+  const gnssAlertLayer = useRef<L.LayerGroup | null>(null);
+  const balloonLayer = useRef<L.LayerGroup | null>(null);
   const aircraftMarkers = useRef<Map<string, L.CircleMarker>>(new Map());
   const vesselMarkers = useRef<Map<string, L.CircleMarker>>(new Map());
+  const balloonMarkers = useRef<Map<string, L.CircleMarker>>(new Map());
   const aircraftSource = useRef<Map<string, string>>(new Map());
+  const trackMeta = useRef<Map<string, TrackMeta>>(new Map());
   const operatorRef = useRef<GeolocOperator | null>(null);
 
   const pocsagLines = useHardwareStore((s) => s.pocsagLines);
@@ -49,6 +69,8 @@ export function ReconSpoofDeck() {
   const [trackBusy, setTrackBusy] = useState(false);
   const [aircraftCount, setAircraftCount] = useState(0);
   const [vesselCount, setVesselCount] = useState(0);
+  const [sondeCount, setSondeCount] = useState(0);
+  const [lookAngle, setLookAngle] = useState<LookAngleData | null>(null);
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [voiceRunning, setVoiceRunning] = useState(false);
   const [voicePhase, setVoicePhase] = useState("idle");
@@ -83,6 +105,37 @@ export function ReconSpoofDeck() {
     return { color: fallback, fill: fallback, opacity: 0.85, radius: 5 };
   };
 
+  const requestLookAngle = async (meta: TrackMeta) => {
+    const op = operatorRef.current;
+    const rxLat = op?.lat ?? mapLat;
+    const rxLon = op?.lon ?? mapLon;
+    const rxAlt = op?.alt_m ?? mapAlt;
+    try {
+      const r = await api.lookAngle({
+        rx_lat: rxLat,
+        rx_lon: rxLon,
+        rx_alt_m: rxAlt ?? 0,
+        tx_lat: meta.lat,
+        tx_lon: meta.lon,
+        tx_alt_m: meta.alt_m,
+        frequency_hz: meta.frequency_hz,
+      });
+      setLookAngle({
+        label: meta.label,
+        azimuth_deg: r.azimuth_deg,
+        elevation_deg: r.elevation_deg,
+        slant_range_m: r.slant_range_m,
+        ground_range_m: r.ground_range_m,
+        fspl_db: r.fspl_db,
+        horizon_km: r.horizon_km,
+        beyond_horizon: r.beyond_horizon,
+        frequency_hz: r.frequency_hz,
+      });
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const upsertTrack = (
     layer: L.LayerGroup | null,
     markers: Map<string, L.CircleMarker>,
@@ -95,11 +148,14 @@ export function ReconSpoofDeck() {
     source?: string,
     speedMps?: number,
     courseDeg?: number,
+    altM?: number,
+    frequencyHz?: number,
   ) => {
     if (!layer || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
     const style = trackColor(source, color);
     const op = operatorRef.current;
     let tip = source ? `${label} · ${source}` : label;
+    if (altM != null && Number.isFinite(altM)) tip += ` · ${Math.round(altM)} m`;
     if (op) {
       const rng = haversineM(op.lat, op.lon, lat, lon);
       tip += ` · ${formatRange(rng)}`;
@@ -111,6 +167,14 @@ export function ReconSpoofDeck() {
         tip += ` · CPA ${formatRange(cpa.range_m)} @ ${Math.round(cpa.time_s)}s`;
       }
     }
+    const meta: TrackMeta = {
+      lat,
+      lon,
+      alt_m: altM ?? 0,
+      frequency_hz: frequencyHz ?? 1090_000_000,
+      label,
+    };
+    trackMeta.current.set(id, meta);
     const existing = markers.get(id);
     if (existing) {
       existing.setLatLng([lat, lon]);
@@ -134,9 +198,82 @@ export function ReconSpoofDeck() {
     })
       .bindTooltip(tip, { permanent: false, direction: "top" })
       .addTo(layer);
+    marker.on("click", () => {
+      const m = trackMeta.current.get(id);
+      if (m) void requestLookAngle(m);
+    });
     markers.set(id, marker);
     if (source) aircraftSource.current.set(id, source);
     onCount(markers.size);
+  };
+
+  const upsertSonde = (metrics: Record<string, unknown>) => {
+    const lat = Number(metrics.lat);
+    const lon = Number(metrics.lon);
+    const serial = String(metrics.serial_id ?? "SONDE");
+    const alt = Number(metrics.alt_m ?? 0);
+    const freq = Number(metrics.frequency_hz ?? 402_500_000);
+    const vz = typeof metrics.vz_mps === "number" ? metrics.vz_mps : undefined;
+    upsertTrack(
+      balloonLayer.current,
+      balloonMarkers.current,
+      serial,
+      lat,
+      lon,
+      `${serial}${vz != null ? ` · vz ${vz.toFixed(1)}` : ""}`,
+      "#fbbf24",
+      setSondeCount,
+      "LOCAL_RF",
+      undefined,
+      typeof metrics.wind_dir_deg === "number" ? Number(metrics.wind_dir_deg) : undefined,
+      alt,
+      freq,
+    );
+    const layer = balloonLayer.current;
+    if (!layer) return;
+    const traj = metrics.trajectory as { lat: number; lon: number }[] | undefined;
+    if (Array.isArray(traj) && traj.length >= 2) {
+      const key = `trail:${serial}`;
+      layer.eachLayer((ly) => {
+        if ((ly as L.Layer & { _sondeKey?: string })._sondeKey === key) layer.removeLayer(ly);
+      });
+      const line = L.polyline(
+        traj.map((p) => L.latLng(p.lat, p.lon)),
+        { color: "#fbbf24", weight: 2, opacity: 0.75 },
+      );
+      (line as L.Layer & { _sondeKey?: string })._sondeKey = key;
+      line.addTo(layer);
+    }
+    const replaceKeyed = (key: string, factory: () => L.Layer) => {
+      layer.eachLayer((ly) => {
+        if ((ly as L.Layer & { _sondeKey?: string })._sondeKey === key) layer.removeLayer(ly);
+      });
+      const ly = factory();
+      (ly as L.Layer & { _sondeKey?: string })._sondeKey = key;
+      ly.addTo(layer);
+    };
+    const burst = metrics.burst as { lat: number; lon: number } | null | undefined;
+    const landing = metrics.landing as { lat: number; lon: number } | null | undefined;
+    if (burst) {
+      replaceKeyed(`burst:${serial}`, () =>
+        L.circleMarker([burst.lat, burst.lon], {
+          radius: 5,
+          color: "#f97316",
+          fillColor: "#ea580c",
+          fillOpacity: 0.9,
+        }).bindTooltip(`${serial} burst predict`),
+      );
+    }
+    if (landing) {
+      replaceKeyed(`land:${serial}`, () =>
+        L.circleMarker([landing.lat, landing.lon], {
+          radius: 6,
+          color: "#a78bfa",
+          fillColor: "#7c3aed",
+          fillOpacity: 0.85,
+        }).bindTooltip(`${serial} landing zone`),
+      );
+    }
   };
 
   const applyLocationLayers = useCallback(
@@ -255,6 +392,121 @@ export function ReconSpoofDeck() {
     [],
   );
 
+  const applySolverOverlay = useCallback((overlay: SolverOverlay) => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!solverLayer.current) solverLayer.current = L.layerGroup().addTo(map);
+    solverLayer.current.clearLayers();
+
+    const toLatLngs = (ring: [number, number][] | null) =>
+      (ring ?? [])
+        .filter((p) => Array.isArray(p) && p.length >= 2)
+        .map(([la, lo]) => L.latLng(Number(la), Number(lo)));
+
+    if (overlay.cep95 && overlay.cep95.length >= 3) {
+      L.polygon(toLatLngs(overlay.cep95), {
+        color: "#f472b6",
+        weight: 2,
+        fillColor: "#db2777",
+        fillOpacity: 0.18,
+      })
+        .bindTooltip("CEP₉₅ ellipse")
+        .addTo(solverLayer.current);
+    }
+    if (overlay.contour95 && overlay.contour95.length >= 3) {
+      L.polygon(toLatLngs(overlay.contour95), {
+        color: "#fbbf24",
+        weight: 1.5,
+        dashArray: "4 4",
+        fillColor: "#f59e0b",
+        fillOpacity: 0.12,
+      })
+        .bindTooltip("RSSI 95% HDR")
+        .addTo(solverLayer.current);
+    }
+    if (overlay.contour80 && overlay.contour80.length >= 3) {
+      L.polygon(toLatLngs(overlay.contour80), {
+        color: "#fde68a",
+        weight: 1,
+        fillColor: "#fbbf24",
+        fillOpacity: 0.2,
+      })
+        .bindTooltip("RSSI 80% HDR")
+        .addTo(solverLayer.current);
+    }
+    if (overlay.mlPin) {
+      L.circleMarker([overlay.mlPin.lat, overlay.mlPin.lon], {
+        radius: 9,
+        color: "#fda4af",
+        fillColor: "#e11d48",
+        fillOpacity: 0.95,
+        weight: 2,
+      })
+        .bindTooltip(overlay.mlPin.label, { permanent: true, direction: "top" })
+        .addTo(solverLayer.current);
+    }
+  }, []);
+
+  const applyFoxhuntOverlay = useCallback((overlay: FoxhuntOverlay) => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!foxhuntLayer.current) foxhuntLayer.current = L.layerGroup().addTo(map);
+    foxhuntLayer.current.clearLayers();
+    if (!overlay) return;
+    const cosLat = Math.cos((overlay.lat * Math.PI) / 180);
+    const tipLat = overlay.lat + overlay.north_m / 111_320;
+    const tipLon = overlay.lon + overlay.east_m / (111_320 * Math.max(0.2, cosLat));
+    const color =
+      overlay.status === "warmer"
+        ? "#34d399"
+        : overlay.status === "colder"
+          ? "#38bdf8"
+          : "#94a3b8";
+    L.polyline(
+      [
+        [overlay.lat, overlay.lon],
+        [tipLat, tipLon],
+      ],
+      { color, weight: 4, opacity: 0.95 },
+    )
+      .bindTooltip(overlay.label, { permanent: true, direction: "top" })
+      .addTo(foxhuntLayer.current);
+    L.circleMarker([tipLat, tipLon], {
+      radius: 6,
+      color,
+      fillColor: color,
+      fillOpacity: 1,
+      weight: 1,
+    }).addTo(foxhuntLayer.current);
+  }, []);
+
+  const applyGnssAlert = useCallback((marker: GnssAlertMarker) => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!gnssAlertLayer.current) gnssAlertLayer.current = L.layerGroup().addTo(map);
+    const color =
+      marker.classification === "NOMINAL"
+        ? "#a3e635"
+        : marker.classification === "WIDEBAND_NOISE_ELEVATION"
+          ? "#f97316"
+          : marker.classification === "CHIRP_SWEEP_DETECTED"
+            ? "#eab308"
+            : "#ef4444";
+    L.circleMarker([marker.lat, marker.lon], {
+      radius: 10,
+      color,
+      fillColor: color,
+      fillOpacity: 0.75,
+      weight: 2,
+    })
+      .bindTooltip(`GNSS L1 · ${marker.classification}`, {
+        permanent: true,
+        direction: "top",
+      })
+      .addTo(gnssAlertLayer.current);
+    map.panTo([marker.lat, marker.lon]);
+  }, []);
+
   useEffect(() => {
     const host = mapHostRef.current;
     if (!host || mapRef.current) return;
@@ -275,10 +527,14 @@ export function ReconSpoofDeck() {
     ).addTo(map);
     aircraftLayer.current = L.layerGroup().addTo(map);
     vesselLayer.current = L.layerGroup().addTo(map);
+    balloonLayer.current = L.layerGroup().addTo(map);
     heatLayer.current = L.layerGroup().addTo(map);
     lobLayer.current = L.layerGroup().addTo(map);
     ringLayer.current = L.layerGroup().addTo(map);
     operatorLayer.current = L.layerGroup().addTo(map);
+    solverLayer.current = L.layerGroup().addTo(map);
+    foxhuntLayer.current = L.layerGroup().addTo(map);
+    gnssAlertLayer.current = L.layerGroup().addTo(map);
     // Legacy lab pin (operator GPS supersedes when available)
     L.circleMarker([49.1182, -1.0972], {
       radius: 5,
@@ -353,7 +609,7 @@ export function ReconSpoofDeck() {
       }
       if (msg.message?.startsWith("decoder_started:")) {
         const kind = msg.message.split(":")[1];
-        if (kind === "adsb" || kind === "ais") setTrackMode(kind);
+        if (kind === "adsb" || kind === "ais" || kind === "radiosonde") setTrackMode(kind);
       }
       if (msg.message === "decoder_stopped") {
         setTrackMode("idle");
@@ -438,6 +694,13 @@ export function ReconSpoofDeck() {
             : typeof msg.metrics?.course_deg === "number"
               ? Number(msg.metrics.course_deg)
               : undefined;
+        const altFt =
+          typeof msg.metrics?.alt === "number"
+            ? Number(msg.metrics.alt)
+            : typeof msg.metrics?.altitude === "number"
+              ? Number(msg.metrics.altitude)
+              : undefined;
+        const altM = altFt != null ? altFt * 0.3048 : 3000;
         upsertTrack(
           aircraftLayer.current,
           aircraftMarkers.current,
@@ -450,6 +713,8 @@ export function ReconSpoofDeck() {
           source,
           speed,
           course,
+          altM,
+          1_090_000_000,
         );
       }
       if (msg.message === "ais") {
@@ -482,21 +747,32 @@ export function ReconSpoofDeck() {
           undefined,
           speed,
           course,
+          0,
+          161_975_000,
         );
+      }
+      if (msg.message === "radiosonde" && msg.metrics) {
+        upsertSonde(msg.metrics as Record<string, unknown>);
       }
     } catch {
       /* ignore */
     }
   }, [telemetrySeq, lastTelemetry, pushPocsag]);
 
-  const startTracks = async (kind: "adsb" | "ais") => {
+  const startTracks = async (kind: "adsb" | "ais" | "radiosonde") => {
     setTrackBusy(true);
     try {
       const lat = spoofPin?.lat ?? mapLat;
       const lon = spoofPin?.lon ?? mapLon;
+      const frequency_hz =
+        kind === "adsb"
+          ? 1_090_000_000
+          : kind === "ais"
+            ? 161_975_000
+            : 402_500_000;
       const res = (await api.startDecoder({
         kind,
-        frequency_hz: kind === "adsb" ? 1_090_000_000 : 161_975_000,
+        frequency_hz,
         lat,
         lon,
       })) as { cmd?: string };
@@ -510,7 +786,11 @@ export function ReconSpoofDeck() {
             : cmd.includes("opensky")
               ? "Aircraft tracking (OpenSky network)"
               : "Aircraft tracking (ADS-B 1090 MHz LOCAL_RF)"
-          : "Boat tracking (AIS via HackRF)",
+          : kind === "ais"
+            ? "Boat tracking (AIS via HackRF)"
+            : cmd.includes("soft-radiosonde")
+              ? "Radiosonde soft mode — inject or install rs41mod"
+              : "Radiosonde 400–406 MHz tracker",
       );
     } catch (err) {
       setTrackMode("idle");
@@ -536,13 +816,18 @@ export function ReconSpoofDeck() {
   const clearTracks = () => {
     aircraftLayer.current?.clearLayers();
     vesselLayer.current?.clearLayers();
+    balloonLayer.current?.clearLayers();
     rangeLayer.current?.remove();
     rangeLayer.current = null;
     aircraftMarkers.current.clear();
     vesselMarkers.current.clear();
+    balloonMarkers.current.clear();
     aircraftSource.current.clear();
+    trackMeta.current.clear();
     setAircraftCount(0);
     setVesselCount(0);
+    setSondeCount(0);
+    setLookAngle(null);
   };
 
   const bookmarkFreq = async (hz: number, description: string, source: string) => {
@@ -677,7 +962,12 @@ export function ReconSpoofDeck() {
 
       <section className="panel flex min-h-[280px] flex-col overflow-hidden rounded lg:min-h-0">
         <div className="border-b border-slate-800 px-2 pt-2">
-          <LocationIntelPanel onLayersChange={applyLocationLayers} />
+          <LocationIntelDeck
+            onLayersChange={applyLocationLayers}
+            onSolverOverlay={applySolverOverlay}
+            onFoxhuntOverlay={applyFoxhuntOverlay}
+            onGnssAlert={applyGnssAlert}
+          />
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-1 border-b border-slate-800 px-2 py-1">
           <div className="flex items-center gap-2">
@@ -686,6 +976,7 @@ export function ReconSpoofDeck() {
             </h3>
             <span className="text-[9px] text-cyan-400/90">AC {aircraftCount}</span>
             <span className="text-[9px] text-emerald-400/90">VES {vesselCount}</span>
+            <span className="text-[9px] text-amber-300/90">SONDE {sondeCount}</span>
             <span className="text-[9px] text-emerald-300/90" title="Local RF / hybrid">
               ● LOCAL
             </span>
@@ -697,7 +988,9 @@ export function ReconSpoofDeck() {
                 ? "hybrid 1090"
                 : trackMode === "ais"
                   ? "RX AIS"
-                  : "idle"}
+                  : trackMode === "radiosonde"
+                    ? "400–406 sonde"
+                    : "idle"}
             </span>
           </div>
           <div className="flex flex-wrap gap-1">
@@ -716,6 +1009,14 @@ export function ReconSpoofDeck() {
               onClick={() => void startTracks("ais")}
             >
               Start Boats
+            </button>
+            <button
+              type="button"
+              disabled={trackBusy}
+              className="rounded border border-amber-700 bg-amber-950/40 px-2 py-0.5 text-[10px] text-amber-200 disabled:opacity-40"
+              onClick={() => void startTracks("radiosonde")}
+            >
+              Start Radiosonde
             </button>
             <button
               type="button"
@@ -738,7 +1039,9 @@ export function ReconSpoofDeck() {
           ref={mapHostRef}
           className="relative w-full flex-1"
           style={{ minHeight: 260, height: "100%" }}
-        />
+        >
+          <LookAngleWidget data={lookAngle} onClose={() => setLookAngle(null)} />
+        </div>
         <div className="grid grid-cols-2 gap-2 border-t border-slate-800 p-2 sm:grid-cols-4">
           <Num label="Lat" value={spoofPin?.lat ?? mapLat} onChange={(v) => setSpoofPin({ lat: v, lon: spoofPin?.lon ?? mapLon })} />
           <Num label="Lon" value={spoofPin?.lon ?? mapLon} onChange={(v) => setSpoofPin({ lat: spoofPin?.lat ?? mapLat, lon: v })} />
