@@ -17,6 +17,7 @@ from pp_dashboard.models.rf import TelemetryEvent
 from pp_dashboard.recon.decoders import AIS_A_HZ, DecoderSession
 from pp_dashboard.recon.hybrid_adsb import DEFAULT_RX_LAT, DEFAULT_RX_LON, HybridAdsbSession
 from pp_dashboard.recon.network_tracks import NetworkTrackSession
+from pp_dashboard.recon.radiosonde import DEFAULT_SONDE_HZ, BAND_HZ, RadiosondeSession
 from pp_dashboard.recon.synth_fm_rds import synthesize_fm_rds
 from pp_dashboard.recon.synth_gps import GPS_L1_HZ, run_gps_sdr_sim, transmit_gps_cs8
 from pp_dashboard.recon.synth_pager import synthesize_lrs_pager, synthesize_touchtunes_pin
@@ -31,7 +32,7 @@ log = logging.getLogger(__name__)
 # Common AIS channels
 AIS_B_HZ = 162_025_000
 
-DecoderLike = DecoderSession | NetworkTrackSession | HybridAdsbSession
+DecoderLike = DecoderSession | NetworkTrackSession | HybridAdsbSession | RadiosondeSession
 
 
 class ReconEngine:
@@ -194,6 +195,10 @@ class ReconEngine:
             freq = AIS_A_HZ
         if req.kind == "pocsag" and req.frequency_hz:
             freq = req.frequency_hz
+        if req.kind == "radiosonde":
+            lo, hi = BAND_HZ
+            if not freq or freq < lo or freq > hi:
+                freq = DEFAULT_SONDE_HZ
 
         async def _to_telemetry(payload: dict[str, Any]) -> None:
             kind = str(payload.get("type") or req.kind)
@@ -218,6 +223,11 @@ class ReconEngine:
             hybrid.subscribe(_to_telemetry)
             desc = await hybrid.start()
             session = hybrid
+        elif req.kind == "radiosonde":
+            sonde = RadiosondeSession(arbiter=self.arbiter, frequency_hz=freq)
+            sonde.subscribe(_to_telemetry)
+            desc = await sonde.start()
+            session = sonde
         else:
             try:
                 rf_session = DecoderSession(

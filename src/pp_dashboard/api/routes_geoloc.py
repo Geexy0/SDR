@@ -7,19 +7,37 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from pathlib import Path
+
 from pp_dashboard.api.deps import arbiter_dep
-from pp_dashboard.geoloc import geo
-from pp_dashboard.geoloc.gnss_monitor import sample_l1_interference
+from pp_dashboard.config import settings
+from pp_dashboard.geoloc import foxhunt, geo, horizon, polar
+from pp_dashboard.geoloc.gnss_monitor import analyze_l1_interference, sample_l1_interference
 from pp_dashboard.geoloc.service import GeolocService
+from pp_dashboard.geoloc.solver import (
+    BearingObservation,
+    DegenerateGeometryError,
+    InsufficientBreadcrumbsError,
+    RssiObservation,
+    solve_rssi_grid,
+    solve_stansfield_wls,
+)
 from pp_dashboard.hardware.arbiter import HardwareArbiter
 from pp_dashboard.models.geoloc import (
     BreadcrumbRequest,
     CpaRequest,
+    FoxhuntRequest,
+    GnssL1AnalyzeRequest,
     GnssSampleRequest,
     LobIntersectRequest,
     LobRequest,
+    LobSolveRequest,
+    LookAngleRequest,
     OperatorFixRequest,
+    PolarPeakRequest,
+    RssiGridSolveRequest,
 )
+from pp_dashboard.security.paths import resolve_safe_path
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/geoloc", tags=["geoloc"])
@@ -128,6 +146,90 @@ async def lob_intersect(body: LobIntersectRequest) -> dict[str, Any]:
     return {"ok": True, "intersection": {"lat": hit.lat, "lon": hit.lon}}
 
 
+@router.post("/lob/solve")
+async def lob_solve(
+    body: LobSolveRequest, svc: GeolocService = Depends(geoloc_dep)
+) -> dict[str, Any]:
+    op = svc.store.get_operator()
+    origin_lat = body.origin_lat
+    origin_lon = body.origin_lon
+    if origin_lat is None and op is not None:
+        origin_lat = float(op["lat"])
+    if origin_lon is None and op is not None:
+        origin_lon = float(op["lon"])
+    obs = [
+        BearingObservation(
+            lat=o.lat,
+            lon=o.lon,
+            bearing_deg=o.bearing_deg,
+            angular_std_deg=o.angular_std_deg,
+            rssi_db=o.rssi_db,
+            timestamp=o.timestamp,
+        )
+        for o in body.observations
+    ]
+    try:
+        result = solve_stansfield_wls(obs, origin_lat=origin_lat, origin_lon=origin_lon)
+    except DegenerateGeometryError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    return result.to_dict()
+
+
+@router.post("/rssi-grid/solve")
+async def rssi_grid_solve(
+    body: RssiGridSolveRequest, svc: GeolocService = Depends(geoloc_dep)
+) -> dict[str, Any]:
+    op = svc.store.get_operator()
+    origin_lat = body.origin_lat
+    origin_lon = body.origin_lon
+    if origin_lat is None and op is not None:
+        origin_lat = float(op["lat"])
+    if origin_lon is None and op is not None:
+        origin_lon = float(op["lon"])
+    obs = [
+        RssiObservation(
+            lat=o.lat, lon=o.lon, rssi_db=o.rssi_db, timestamp=o.timestamp
+        )
+        for o in body.observations
+    ]
+    try:
+        result = solve_rssi_grid(
+            obs,
+            origin_lat=origin_lat,
+            origin_lon=origin_lon,
+            gamma=body.gamma,
+            shadow_std_db=body.shadow_std_db,
+            grid_n=body.grid_n,
+            pad_m=body.pad_m,
+        )
+    except (InsufficientBreadcrumbsError, ValueError) as exc:
+        code = (
+            status.HTTP_422_UNPROCESSABLE_ENTITY
+            if isinstance(exc, InsufficientBreadcrumbsError)
+            else status.HTTP_400_BAD_REQUEST
+        )
+        raise HTTPException(status_code=code, detail=str(exc)) from exc
+    return result.to_dict()
+
+
+@router.post("/solve")
+async def geoloc_solve(
+    body: dict[str, Any], svc: GeolocService = Depends(geoloc_dep)
+) -> dict[str, Any]:
+    """Dispatcher: ``mode=lob|rssi`` → Stansfield or RSSI-grid solver."""
+    mode = str(body.get("mode") or "lob").lower()
+    if mode == "lob":
+        return await lob_solve(LobSolveRequest.model_validate(body), svc)
+    if mode in {"rssi", "rssi-grid", "rssi_grid"}:
+        return await rssi_grid_solve(RssiGridSolveRequest.model_validate(body), svc)
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="mode must be 'lob' or 'rssi'",
+    )
+
+
 @router.post("/cpa")
 async def cpa(body: CpaRequest) -> dict[str, Any]:
     result = geo.closest_point_of_approach(
@@ -191,6 +293,31 @@ async def range_rings(
     return {"ok": True, "operator": op, "rings": rings}
 
 
+@router.post("/foxhunt")
+async def foxhunt_homing(body: FoxhuntRequest) -> dict[str, Any]:
+    samples = [
+        foxhunt.FoxSample(
+            lat=s.lat, lon=s.lon, rssi_db=s.rssi_db, t_mono=s.t_mono
+        )
+        for s in body.samples
+    ]
+    return foxhunt.evaluate_homing(samples, window_sec=body.window_sec).to_dict()
+
+
+@router.post("/polar/peak")
+async def polar_peak(body: PolarPeakRequest) -> dict[str, Any]:
+    try:
+        peak = polar.circular_lobe_centroid(
+            [
+                polar.PolarSample(bearing_deg=s.bearing_deg, rssi_db=s.rssi_db)
+                for s in body.samples
+            ]
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return peak.to_dict()
+
+
 @router.post("/gnss/l1-sample")
 async def gnss_l1_sample(
     body: GnssSampleRequest | None = None,
@@ -213,9 +340,63 @@ async def gnss_l1_sample(
         ) from None
 
 
+@router.post("/gnss/l1-analyze")
+async def gnss_l1_analyze(
+    body: GnssL1AnalyzeRequest | None = None,
+    arbiter: HardwareArbiter = Depends(arbiter_dep),
+    svc: GeolocService = Depends(geoloc_dep),
+) -> dict[str, Any]:
+    req = body or GnssL1AnalyzeRequest()
+    vga = int(req.vga) - (int(req.vga) % 2)
+    op = svc.store.get_operator()
+    lat = req.operator_lat if req.operator_lat is not None else (float(op["lat"]) if op else None)
+    lon = req.operator_lon if req.operator_lon is not None else (float(op["lon"]) if op else None)
+    filepath: Path | None = None
+    if req.filepath:
+        try:
+            filepath = resolve_safe_path(settings.captures_dir, Path(req.filepath))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if not filepath.is_file():
+            raise HTTPException(status_code=404, detail="filepath not found under captures")
+    try:
+        return await analyze_l1_interference(
+            arbiter,
+            duration_sec=req.duration_sec,
+            lna=req.lna,
+            vga=vga,
+            baseline_noise_db=req.baseline_noise_db,
+            filepath=filepath,
+            operator_lat=lat,
+            operator_lon=lon,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except Exception:
+        log.exception("gnss l1 analyze failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="gnss l1 analyze failed",
+        ) from None
+
+
 @router.get("/gnss/samples")
 async def gnss_samples(
     limit: int = Query(default=50, ge=1, le=500),
     svc: GeolocService = Depends(geoloc_dep),
 ) -> dict[str, Any]:
     return {"samples": svc.store.list_gnss_samples(limit=limit)}
+
+
+@router.post("/look-angle")
+async def look_angle(body: LookAngleRequest) -> dict[str, Any]:
+    result = horizon.look_angle(
+        rx_lat=body.rx_lat,
+        rx_lon=body.rx_lon,
+        rx_alt_m=body.rx_alt_m,
+        tx_lat=body.tx_lat,
+        tx_lon=body.tx_lon,
+        tx_alt_m=body.tx_alt_m,
+        frequency_hz=body.frequency_hz,
+    )
+    return {"ok": True, **result.to_dict()}

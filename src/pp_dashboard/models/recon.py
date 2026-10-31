@@ -51,7 +51,7 @@ class SweepStartRequest(BaseModel):
 
 
 class DecoderStartRequest(BaseModel):
-    kind: Literal["pocsag", "adsb", "ais"]
+    kind: Literal["pocsag", "adsb", "ais", "radiosonde"]
     frequency_hz: int = Field(..., ge=FREQ_MIN_HZ, le=FREQ_MAX_HZ)
     # Optional map center for network track fallback (OpenSky).
     lat: float | None = Field(default=None, ge=-90, le=90)

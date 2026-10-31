@@ -10,6 +10,7 @@ from typing import Any, TypeVar
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 
+from pp_dashboard.models.geoloc import RadiosondeInjectRequest
 from pp_dashboard.models.recon import (
     DecoderStartRequest,
     MissionStartRequest,
@@ -17,6 +18,7 @@ from pp_dashboard.models.recon import (
     VoiceReconStartRequest,
 )
 from pp_dashboard.recon.engine import ReconEngine, get_recon_engine
+from pp_dashboard.recon.radiosonde import SondeFrame, get_sonde_store
 from pp_dashboard.recon.scheduler import (
     MISSION_TEMPLATES,
     MissionScheduler,
@@ -105,6 +107,41 @@ async def start_decoder(
 @router.post("/decoder/stop")
 async def stop_decoder(engine: ReconEngine = Depends(engine_dep)) -> dict:
     return await engine.stop_decoder()
+
+
+@router.get("/radiosonde/tracks")
+async def radiosonde_tracks() -> dict[str, Any]:
+    store = get_sonde_store()
+    return {"tracks": [t.to_dict() for t in store.list_tracks()]}
+
+
+@router.post("/radiosonde/inject")
+async def radiosonde_inject(
+    body: RadiosondeInjectRequest,
+    engine: ReconEngine = Depends(engine_dep),
+) -> dict[str, Any]:
+    """Offline / sim inject of a radiosonde fix (also used when soft decoder is active)."""
+    import time
+
+    frame = SondeFrame(
+        serial_id=body.serial_id,
+        lat=body.lat,
+        lon=body.lon,
+        alt_m=body.alt_m,
+        vz_mps=body.vz_mps,
+        wind_speed_mps=body.wind_speed_mps,
+        wind_dir_deg=body.wind_dir_deg,
+        temp_c=body.temp_c,
+        frequency_hz=body.frequency_hz,
+        kind=body.kind,
+        t_mono=time.monotonic(),
+    )
+    session = engine.decoder
+    if session is not None and getattr(session, "kind", None) == "radiosonde":
+        payload = await session.ingest_frame(frame)  # type: ignore[attr-defined]
+        return {"ok": True, "track": payload}
+    track = get_sonde_store().ingest(frame)
+    return {"ok": True, "track": track.to_dict()}
 
 
 @router.post("/voice")
