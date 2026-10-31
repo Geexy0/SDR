@@ -12,6 +12,33 @@ import pytest
 from tests.fakes import FakeMayhemSerial, FakeSubprocessPool
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--run-hil",
+        action="store_true",
+        default=False,
+        help="Run hardware-in-the-loop tests (requires PortaPack/HackRF on USB)",
+    )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "hil: hardware-in-the-loop RX smoke (deselect unless --run-hil)",
+    )
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    if config.getoption("--run-hil"):
+        return
+    skip = pytest.mark.skip(reason="need --run-hil for HIL suite")
+    for item in items:
+        if "hil" in item.keywords:
+            item.add_marker(skip)
+
+
 @pytest.fixture
 def synthetic_cs8_factory(tmp_path: Path):
     """Deterministic CS8 IQ file builders under tmp_path."""
@@ -87,8 +114,19 @@ def synthetic_cs8_factory(tmp_path: Path):
 
 
 @pytest.fixture(autouse=True)
-def isolate_hardware(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> FakeSubprocessPool:
-    """Redirect captures/DBs and mock serial + SDR subprocesses for every test."""
+def isolate_hardware(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> FakeSubprocessPool | None:
+    """Redirect captures/DBs and mock serial + SDR subprocesses for every test.
+
+    HIL tests (`@pytest.mark.hil`) skip isolation so physical USB/CLI can run.
+    """
+    if request.node.get_closest_marker("hil"):
+        yield None
+        return
+
     FakeMayhemSerial.reset()
     pool = FakeSubprocessPool()
 
@@ -145,4 +183,4 @@ def isolate_hardware(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> FakeSub
         lambda cfg=None: "/dev/ttyACM0",
     )
 
-    return pool
+    yield pool

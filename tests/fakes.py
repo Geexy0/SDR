@@ -149,6 +149,19 @@ class FakeProcess:
         assert self.returncode is not None
         return self.returncode
 
+    async def communicate(self, input: bytes | None = None) -> tuple[bytes, bytes]:
+        """Match asyncio.subprocess.Process.communicate for detect._run_capture."""
+        _ = input
+        if self.returncode is None:
+            await self.wait()
+        out = b"".join(
+            (ln if ln.endswith(b"\n") else ln + b"\n") for ln in self.stdout_lines
+        )
+        err = b"".join(
+            (ln if ln.endswith(b"\n") else ln + b"\n") for ln in self.stderr_lines
+        )
+        return out, err
+
 
 class FakeSubprocessPool:
     """Intercepts hackrf_* / rtl_433 / spiflash without touching libusb."""
@@ -181,12 +194,17 @@ class FakeSubprocessPool:
         self._real_exec = aio.create_subprocess_exec
 
         def _fake_killpg(pid: int, sig: int) -> None:
-            """Route process-group signals to FakeProcess — never touch real PIDs."""
-            for proc in self.processes:
-                if proc.pid == pid:
-                    proc.send_signal(sig)
-                    return
-            raise ProcessLookupError(f"fake killpg: no process {pid}")
+            """Route process-group signals to FakeProcess — never touch real PIDs.
+
+            All FakeProcess instances share a default pid; prefer live children
+            (returncode is None) so SIGINT reaches the active SDR job.
+            """
+            live = [p for p in self.processes if p.pid == pid and p.returncode is None]
+            targets = live or [p for p in self.processes if p.pid == pid]
+            if not targets:
+                raise ProcessLookupError(f"fake killpg: no process {pid}")
+            for proc in targets:
+                proc.send_signal(sig)
 
         monkeypatch.setattr(_os, "killpg", _fake_killpg)
 

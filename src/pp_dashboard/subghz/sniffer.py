@@ -50,6 +50,18 @@ class Rtl433Sniffer:
         self._freq_hz: int | None = None
         self._fifo_proc: asyncio.subprocess.Process | None = None
 
+    @property
+    def running(self) -> bool:
+        fifo = self._fifo_proc
+        if fifo is not None and fifo.returncode is None:
+            return True
+        argv = self.arbiter.runner.argv
+        return bool(
+            self.arbiter.runner.running
+            and argv
+            and "rtl_433" in Path(argv[0]).name
+        )
+
     def subscribe(self, handler: PacketHandler) -> None:
         if handler not in self._handlers:
             self._handlers.append(handler)
