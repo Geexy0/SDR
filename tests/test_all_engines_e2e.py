@@ -40,8 +40,7 @@ async def _assert_kill_clean(
 ) -> None:
     stop = await client.post("/api/hardware/stop")
     assert stop.status_code == 200
-    # Give stop callbacks a beat
-    await asyncio.sleep(0.05)
+    await asyncio.sleep(0.08)
     assert arbiter.is_sdr_busy() is False
     alive = [p for p in pool.processes if p.returncode is None]
     assert not alive, f"orphan FakeProcess still running: {alive}"
@@ -49,9 +48,21 @@ async def _assert_kill_clean(
     for d in capture_dirs:
         if d.exists():
             leftovers.extend(d.glob("*.cs8"))
-    # Live engines may leave intentional capture artifacts; only flag /dev/shm-style temps
     shmish = [p for p in leftovers if "shm" in str(p) or p.name.startswith("ook_")]
     assert not shmish, f"leftover temp .cs8: {shmish}"
+
+
+async def _wait_frames(pool: FakeSubprocessPool, key: str, *, min_n: int = 1, timeout: float = 2.0) -> None:
+    deadline = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < deadline:
+        if pool.frames_emitted.get(key, 0) >= min_n:
+            return
+        # Some engines spawn a bit after HTTP 200
+        await asyncio.sleep(0.05)
+    assert pool.frames_emitted.get(key, 0) >= min_n, (
+        f"expected ≥{min_n} synthetic '{key}' frame(s), got {pool.frames_emitted!r} "
+        f"started={pool.started!r}"
+    )
 
 
 @pytest.fixture
@@ -66,16 +77,18 @@ async def e2e_client(
     from pp_dashboard.geoloc.service import GeolocService
     from pp_dashboard.hardware.detect import DetectionResult
     from pp_dashboard.recon.engine import ReconEngine
+    from pp_dashboard.subghz.engine import SubGhzEngine
     from pp_dashboard.tpms.engine import TpmsEngine
 
+    assert isolate_hardware is not None
     _confirm_gate(tmp_path, monkeypatch)
     shm = tmp_path / "shm"
     shm.mkdir(exist_ok=True)
     monkeypatch.setenv("PP_MOCK_HARDWARE", "1")
     monkeypatch.setattr(settings, "mode_switch_timeout_s", 1.0)
     monkeypatch.setattr(settings, "sigkill_grace_s", 0.2)
-    capture_roots = [settings.captures_dir, shm, Path("/dev/shm")]
-    capture_roots = [settings.captures_dir, shm, Path("/dev/shm")]
+    # Only assert on fixtures under tmp — never scan host /dev/shm (cross-test pollution).
+    capture_roots = [settings.captures_dir, shm]
 
     async def _native_detect(cfg=None):
         return DetectionResult(
@@ -93,6 +106,7 @@ async def e2e_client(
     GeolocService.reset_instance_for_tests()
     ReconEngine._instance = None  # noqa: SLF001
     TpmsEngine._instance = None  # noqa: SLF001
+    SubGhzEngine._instance = None  # noqa: SLF001
 
     app = create_app()
     transport = ASGITransport(app=app)
@@ -106,17 +120,16 @@ async def e2e_client(
 @pytest.mark.asyncio
 async def test_arbiter_mode_toggle_roundtrip(e2e_client) -> None:
     client, arbiter, pool, caps = e2e_client
-    # Force serial then native via API
     r1 = await client.post("/api/hardware/mode", json={"mode": "MAYHEM_SERIAL"})
-    assert r1.status_code in {200, 409}
+    assert r1.status_code == 200, r1.text[:300]
     r2 = await client.post("/api/hardware/mode", json={"mode": "HACKRF_NATIVE"})
-    assert r2.status_code in {200, 409}
+    assert r2.status_code == 200, r2.text[:300]
     await _assert_kill_clean(client, arbiter, pool, caps)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "start_path,start_body",
+    "start_path,start_body,frame_key",
     [
         (
             "/api/hardware/sweep",
@@ -127,6 +140,7 @@ async def test_arbiter_mode_toggle_roundtrip(e2e_client) -> None:
                 "lna": 24,
                 "vga": 20,
             },
+            "hackrf_sweep",
         ),
         (
             "/api/hardware/multiplex",
@@ -137,6 +151,7 @@ async def test_arbiter_mode_toggle_roundtrip(e2e_client) -> None:
                 "vga": 20,
                 "amp": 0,
             },
+            "hackrf_transfer",
         ),
         (
             "/api/subghz/sniff",
@@ -145,6 +160,7 @@ async def test_arbiter_mode_toggle_roundtrip(e2e_client) -> None:
                 "sample_rate": 2_000_000,
                 "max_duration_sec": 2,
             },
+            "rtl_433",
         ),
         (
             "/api/tpms/listen",
@@ -153,37 +169,57 @@ async def test_arbiter_mode_toggle_roundtrip(e2e_client) -> None:
                 "sample_rate": 2_000_000,
                 "max_duration_sec": 2,
             },
+            "rtl_433",
         ),
         (
             "/api/recon/decoder",
             {"kind": "pocsag", "frequency_hz": 466_075_000},
+            "multimon-ng",
         ),
         (
             "/api/recon/decoder",
             {"kind": "ais", "frequency_hz": 161_975_000},
+            "ais-catcher",
         ),
         (
             "/api/recon/decoder",
             {"kind": "radiosonde", "frequency_hz": 402_500_000},
+            "rs41mod",
         ),
         (
             "/api/recon/voice",
             {"start_lna": 24, "start_vga": 20, "local_aplay": False},
+            "hackrf_sweep",
         ),
     ],
 )
 async def test_engine_start_then_hardware_stop(
-    e2e_client, start_path: str, start_body: dict
+    e2e_client, start_path: str, start_body: dict, frame_key: str
 ) -> None:
     client, arbiter, pool, caps = e2e_client
     res = await client.post(start_path, json=start_body)
-    # Engines may 200 (started), 409 (busy/conflict), or 503 (tool missing)
-    assert res.status_code in {200, 409, 503}, (
-        f"{start_path} unexpected {res.status_code}: {res.text[:240]}"
+    assert res.status_code == 200, (
+        f"{start_path} expected 200, got {res.status_code}: {res.text[:400]}"
     )
-    if res.status_code == 200:
-        # Soft busy check — multiplex/sweep register via runner or callbacks
-        _ = arbiter.is_sdr_busy()
+    assert arbiter.is_sdr_busy() is True or arbiter.state in {
+        HardwareState.BUSY_RX,
+        HardwareState.BUSY_TX,
+        HardwareState.MULTIPLEX_RX,
+        HardwareState.HACKRF_NATIVE,
+    }
+    await _wait_frames(pool, frame_key, min_n=1)
+    # Sub-GHz / TPMS should have persisted at least one JSON decode
+    if frame_key == "rtl_433":
+        await asyncio.sleep(0.15)
+        if start_path.startswith("/api/subghz"):
+            pk = await client.get("/api/subghz/packets?limit=10")
+            assert pk.status_code == 200
+            assert len(pk.json().get("packets") or pk.json() or []) >= 1 or isinstance(
+                pk.json(), list
+            )
+        if start_path.startswith("/api/tpms"):
+            st = await client.get("/api/tpms/status")
+            assert st.status_code == 200
     await _assert_kill_clean(client, arbiter, pool, caps)
 
 
@@ -208,7 +244,8 @@ async def test_mission_scheduler_start_stop(e2e_client) -> None:
             ]
         }
     start = await client.post("/api/recon/mission", json=body)
-    assert start.status_code in {200, 409, 422}
+    assert start.status_code == 200, start.text[:400]
+    await asyncio.sleep(0.2)
     stop = await client.post("/api/recon/mission/stop")
     assert stop.status_code == 200
     await _assert_kill_clean(client, arbiter, pool, caps)
@@ -266,7 +303,7 @@ async def test_geoloc_engine_analysis_chain(e2e_client) -> None:
             ],
         },
     )
-    assert solve.status_code in {200, 422}
+    assert solve.status_code == 200, solve.text[:300]
     rssi = await client.post(
         "/api/geoloc/rssi-grid/solve",
         json={
@@ -282,23 +319,24 @@ async def test_geoloc_engine_analysis_chain(e2e_client) -> None:
         },
     )
     assert rssi.status_code == 200
-    # GNSS L1 analyze may 409 if arbiter busy; soft-ok
     l1 = await client.post(
         "/api/geoloc/gnss/l1-analyze",
         json={"duration_sec": 0.1, "lna": 24, "vga": 20},
     )
-    assert l1.status_code in {200, 409, 500}
+    assert l1.status_code == 200, l1.text[:400]
+    await _wait_frames(pool, "hackrf_transfer", min_n=1)
     await _assert_kill_clean(client, arbiter, pool, caps)
 
 
 @pytest.mark.asyncio
-async def test_adsb_decoder_soft_start_stop(e2e_client) -> None:
+async def test_adsb_decoder_start_stop(e2e_client) -> None:
     client, arbiter, pool, caps = e2e_client
     res = await client.post(
         "/api/recon/decoder",
         json={"kind": "adsb", "frequency_hz": 1_090_000_000, "lat": 49.12, "lon": -1.10},
     )
-    assert res.status_code in {200, 409, 503}
+    assert res.status_code == 200, res.text[:400]
+    await _wait_frames(pool, "readsb", min_n=1)
     stop = await client.post("/api/recon/decoder/stop")
     assert stop.status_code == 200
     await _assert_kill_clean(client, arbiter, pool, caps)

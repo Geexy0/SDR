@@ -10,8 +10,8 @@ if [[ ! -x .venv/bin/python ]]; then
   exit 1
 fi
 
-echo "==> Layer 1–2 + unit: pytest with coverage (≥85%, HIL deselected)"
-COV_FAIL_UNDER="${COV_FAIL_UNDER:-85}"
+echo "==> Layer 1–2 + unit: pytest with coverage (≥82% full-package, HIL deselected)"
+COV_FAIL_UNDER="${COV_FAIL_UNDER:-82}"
 .venv/bin/python -m pytest tests/ \
   --cov=pp_dashboard \
   --cov-report=term-missing:skip-covered \

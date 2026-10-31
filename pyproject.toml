@@ -42,44 +42,15 @@ markers = [
 
 [tool.coverage.run]
 source = ["pp_dashboard"]
-# Line coverage for the master harness gate. Long-running USB/WS stream pumps are
-# exercised by Layer 2 soft-start + Layer 4 HIL; omit their readline loops here.
 branch = false
+# Full-package gate — only legacy HTML console / CLI-style entry surfaces omitted.
 omit = [
-  # Legacy HTML console (SPA is the product surface)
   "*/web/home.py",
-  # WebSocket / serial stream pumps — Layer 2 soft-start + Layer 4 HIL
-  "*/api/ws_*.py",
-  "*/mayhem/bridge.py",
-  "*/mayhem/freqman_sync.py",
-  "*/mayhem/freqman.py",
-  "*/recon/voice_recon.py",
-  "*/recon/waterfall.py",
-  "*/recon/decoders.py",
-  "*/recon/scheduler.py",
-  "*/recon/hybrid_adsb.py",
-  "*/recon/modes_s.py",
-  "*/recon/radiosonde.py",
-  "*/recon/audio_hub.py",
-  "*/recon/synth_gps.py",
-  "*/recon/engine.py",
-  "*/hardware/iq_multiplexer.py",
-  "*/hardware/arbiter.py",
-  "*/hardware/detect.py",
-  "*/subghz/engine.py",
-  "*/subghz/sniffer.py",
-  "*/subghz/subfile.py",
-  "*/tpms/engine.py",
-  "*/rf/engine.py",
-  "*/main.py",
-  "*/recon/network_tracks.py",
-  "*/hardware/__init__.py",
-  "*/recon/__init__.py",
-  "*/subghz/__init__.py",
+  "*/__main__.py",
 ]
 
 [tool.coverage.report]
-fail_under = 85
+fail_under = 82
 show_missing = true
 skip_empty = true
 exclude_lines = [

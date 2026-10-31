@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 from pathlib import Path
 from typing import Any
 
@@ -149,10 +150,28 @@ def isolate_hardware(
     except Exception:
         pass
 
+    # --- binary resolution: always "find" SDR CLIs under /usr/bin ---
+    import shutil
+
+    from tests.fakes import MOCK_SDR_BINARIES
+
+    real_which = shutil.which
+
+    def _fake_which(cmd: str | None, mode: int = os.F_OK, path: str | None = None) -> str | None:  # noqa: ARG001
+        if not cmd:
+            return None
+        name = str(cmd).rsplit("/", 1)[-1]
+        if name in MOCK_SDR_BINARIES or str(cmd) in MOCK_SDR_BINARIES:
+            return f"/usr/bin/{name}"
+        return real_which(cmd, path=path)
+
+    monkeypatch.setattr(shutil, "which", _fake_which)
+
     # --- subprocess pool ---
     pool.install(monkeypatch)
 
-    # detect_hardware should never call real lsusb/hackrf_info
+    # detect_hardware should never call real lsusb/hackrf_info by default;
+    # individual tests may override (e.g. e2e native detect).
     async def _fake_detect(cfg: Any = None):
         from pp_dashboard.hardware.detect import DetectionResult
 
