@@ -23,10 +23,14 @@ from pp_dashboard.geoloc.solver import (
     solve_stansfield_wls,
 )
 from pp_dashboard.hardware.arbiter import HardwareArbiter
+from pp_dashboard.geoloc.live_fusion import LiveGeoHuntFusion, fit_doppler_pass
 from pp_dashboard.models.geoloc import (
     BreadcrumbRequest,
     CpaRequest,
+    DopplerFitRequest,
     FoxhuntRequest,
+    GeoHuntBearingRequest,
+    GeoHuntIngestRequest,
     GnssL1AnalyzeRequest,
     GnssSampleRequest,
     LobIntersectRequest,
@@ -37,6 +41,7 @@ from pp_dashboard.models.geoloc import (
     PolarPeakRequest,
     RssiGridSolveRequest,
 )
+from pp_dashboard.models.rf import TelemetryEvent
 from pp_dashboard.security.paths import resolve_safe_path
 
 log = logging.getLogger(__name__)
@@ -400,3 +405,93 @@ async def look_angle(body: LookAngleRequest) -> dict[str, Any]:
         frequency_hz=body.frequency_hz,
     )
     return {"ok": True, **result.to_dict()}
+
+
+async def _hunt_dep() -> LiveGeoHuntFusion:
+    return await LiveGeoHuntFusion.get_instance()
+
+
+async def _wire_hunt_telemetry(fusion: LiveGeoHuntFusion, arbiter: HardwareArbiter) -> None:
+    async def _sink(event: dict[str, Any]) -> None:
+        ev_type = str(event.get("type") or "metric")
+        if ev_type not in {
+            "status",
+            "stdout",
+            "stderr",
+            "metric",
+            "process_exit",
+            "error",
+            "heartbeat",
+            "mission",
+            "geohunt_update",
+        }:
+            ev_type = "metric"
+        await arbiter._fanout_telemetry(  # noqa: SLF001
+            TelemetryEvent(
+                type=ev_type,  # type: ignore[arg-type]
+                message=event.get("message"),
+                metrics=event.get("metrics") if isinstance(event.get("metrics"), dict) else event,
+                state=arbiter.state,
+            )
+        )
+
+    fusion.on_telemetry = _sink
+
+
+@router.post("/hunt/start")
+async def hunt_start(
+    arbiter: HardwareArbiter = Depends(arbiter_dep),
+    fusion: LiveGeoHuntFusion = Depends(_hunt_dep),
+) -> dict[str, Any]:
+    await _wire_hunt_telemetry(fusion, arbiter)
+    return await fusion.start()
+
+
+@router.post("/hunt/stop")
+async def hunt_stop(fusion: LiveGeoHuntFusion = Depends(_hunt_dep)) -> dict[str, Any]:
+    return await fusion.stop()
+
+
+@router.get("/hunt/status")
+async def hunt_status(fusion: LiveGeoHuntFusion = Depends(_hunt_dep)) -> dict[str, Any]:
+    return fusion.status()
+
+
+@router.post("/hunt/ingest")
+async def hunt_ingest(
+    body: GeoHuntIngestRequest,
+    fusion: LiveGeoHuntFusion = Depends(_hunt_dep),
+) -> dict[str, Any]:
+    return await fusion.ingest_rx_hit(
+        lat=body.lat,
+        lon=body.lon,
+        rssi_db=body.rssi_db,
+        freq_hz=body.freq_hz,
+        emitter_id=body.emitter_id,
+        timestamp=body.timestamp,
+    )
+
+
+@router.post("/hunt/bearing")
+async def hunt_bearing(
+    body: GeoHuntBearingRequest,
+    fusion: LiveGeoHuntFusion = Depends(_hunt_dep),
+) -> dict[str, Any]:
+    return await fusion.ingest_bearing(
+        lat=body.lat,
+        lon=body.lon,
+        bearing_deg=body.bearing_deg,
+        emitter_id=body.emitter_id,
+        freq_hz=body.freq_hz,
+        rssi_db=body.rssi_db,
+        angular_std_deg=body.angular_std_deg,
+    )
+
+
+@router.post("/doppler/fit")
+async def doppler_fit(body: DopplerFitRequest) -> dict[str, Any]:
+    samples = [(s.timestamp, s.measured_cfo_hz) for s in body.samples]
+    try:
+        return fit_doppler_pass(samples, nominal_freq_hz=body.nominal_freq_hz)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

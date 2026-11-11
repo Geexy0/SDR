@@ -80,6 +80,14 @@ export interface SubGhzPacket {
   raw_pulses_us: number[] | null;
 }
 
+export interface RfFingerprintBadge {
+  physical_emitter_id: string;
+  cfo_ppm: number;
+  rise_time_us: number;
+  clone_alert: boolean;
+  alert?: string | null;
+}
+
 export interface AnalyzeTiming {
   short_us: number | null;
   long_us: number | null;

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Crosshair, Play, Square } from "lucide-react";
 import { api, wsUrl } from "@/lib/api";
-import type { SubGhzPacket } from "@/lib/types";
+import type { RfFingerprintBadge, SubGhzPacket } from "@/lib/types";
 import { useHardwareStore } from "@/store/useHardwareStore";
 import { PulseAnalyzerCanvas } from "./PulseAnalyzerCanvas";
 
@@ -43,6 +43,7 @@ export function SubGhzDeck() {
   const setBfIsolatedKeys = useHardwareStore((s) => s.setBfIsolatedKeys);
 
   const [capturePath, setCapturePath] = useState("captures/sample.cs8");
+  const [fingerprint, setFingerprint] = useState<RfFingerprintBadge | null>(null);
 
   useEffect(() => {
     void api
@@ -98,9 +99,30 @@ export function SubGhzDeck() {
       const fskNote = fsk
         ? ` · FSK ±${fsk.deviation_khz.toFixed(1)} kHz @ ${fsk.baud_est.toFixed(0)} baud`
         : "";
-      setToast(
-        `Analyzed ${result.pulse_count} pulses · ${result.timing.encoding}${fskNote}`,
-      );
+      try {
+        const fp = await api.fingerprintAnalyze({
+          filepath: path,
+          sample_rate: 2_000_000,
+          nominal_freq_hz: Math.round(frequencyHz) || 433_920_000,
+        });
+        setFingerprint({
+          physical_emitter_id: fp.physical_emitter_id,
+          cfo_ppm: fp.fingerprint.cfo_ppm,
+          rise_time_us: fp.fingerprint.rise_time_us,
+          clone_alert: fp.clone_alert,
+          alert: fp.alert,
+        });
+        setToast(
+          fp.clone_alert
+            ? `CLONE ALERT · ${fp.physical_emitter_id}`
+            : `Analyzed ${result.pulse_count} pulses · ${fp.physical_emitter_id}${fskNote}`,
+        );
+      } catch {
+        setFingerprint(null);
+        setToast(
+          `Analyzed ${result.pulse_count} pulses · ${result.timing.encoding}${fskNote}`,
+        );
+      }
     } catch (err) {
       setToast(err instanceof Error ? err.message : String(err));
     }
@@ -255,6 +277,24 @@ export function SubGhzDeck() {
             Analyze
           </button>
         </div>
+        {fingerprint && (
+          <div
+            className={`mb-1 flex flex-wrap items-center gap-2 rounded border px-2 py-0.5 font-mono text-[10px] ${
+              fingerprint.clone_alert
+                ? "border-red-600 bg-red-950/40 text-red-200"
+                : "border-amber-800 bg-amber-950/30 text-amber-200"
+            }`}
+          >
+            <span className="font-bold">{fingerprint.physical_emitter_id}</span>
+            <span>CFO {fingerprint.cfo_ppm.toFixed(2)} ppm</span>
+            <span>Rise {fingerprint.rise_time_us.toFixed(1)} µs</span>
+            {fingerprint.clone_alert && (
+              <span className="rounded bg-red-700 px-1 font-bold uppercase text-white">
+                CLONE ALERT
+              </span>
+            )}
+          </div>
+        )}
         <PulseAnalyzerCanvas />
       </section>
 

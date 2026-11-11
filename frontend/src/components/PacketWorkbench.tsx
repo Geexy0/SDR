@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Binary, Crosshair, FlaskConical } from "lucide-react";
 import { api } from "@/lib/api";
 import type {
+  RfFingerprintBadge,
   WorkbenchColumnClass,
   WorkbenchDemodResult,
   WorkbenchLineCode,
@@ -57,6 +58,8 @@ export function PacketWorkbench() {
   const [viewMode, setViewMode] = useState<"hex" | "bin">("hex");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<WorkbenchDemodResult | null>(null);
+  const [fingerprint, setFingerprint] = useState<RfFingerprintBadge | null>(null);
+  const frequencyHz = useHardwareStore((s) => s.frequencyHz);
 
   const matrix = useMemo(() => {
     if (!result?.packets?.length) return null;
@@ -100,9 +103,38 @@ export function PacketWorkbench() {
       const r = await api.workbenchDemod(body);
       setResult(r);
       setSelectedCapture(path);
-      setToast(
-        `Workbench · ${r.modulation} @ ${r.baud_est.toFixed(0)} baud · ${r.packets.length} pkt`,
-      );
+      try {
+        const dig =
+          r.packets[0]?.payload_hex?.slice(0, 12) ??
+          r.sync_word ??
+          undefined;
+        const fp = await api.fingerprintAnalyze({
+          filepath: path,
+          sample_rate: Math.round(Number(sampleRate) || 2_000_000),
+          nominal_freq_hz: Math.round(frequencyHz) || 433_920_000,
+          digital_device_id: dig ? `WB-${dig}` : undefined,
+          bits_hex: dig,
+        });
+        setFingerprint({
+          physical_emitter_id: fp.physical_emitter_id,
+          cfo_ppm: fp.fingerprint.cfo_ppm,
+          rise_time_us: fp.fingerprint.rise_time_us,
+          clone_alert: fp.clone_alert,
+          alert: fp.alert,
+        });
+        if (fp.clone_alert) {
+          setToast(`CLONE ALERT · ${fp.physical_emitter_id}`);
+        } else {
+          setToast(
+            `Workbench · ${r.modulation} @ ${r.baud_est.toFixed(0)} baud · ${fp.physical_emitter_id}`,
+          );
+        }
+      } catch {
+        setFingerprint(null);
+        setToast(
+          `Workbench · ${r.modulation} @ ${r.baud_est.toFixed(0)} baud · ${r.packets.length} pkt`,
+        );
+      }
     } catch (err) {
       setToast(err instanceof Error ? err.message : String(err));
     } finally {
@@ -181,6 +213,26 @@ export function PacketWorkbench() {
             {busy ? "Demod…" : "Demod"}
           </button>
         </div>
+        {fingerprint && (
+          <div
+            className={`mt-2 flex flex-wrap items-center gap-2 rounded border px-2 py-1 text-[10px] font-mono ${
+              fingerprint.clone_alert
+                ? "border-red-600 bg-red-950/50 text-red-200"
+                : "border-amber-800 bg-amber-950/30 text-amber-200"
+            }`}
+          >
+            <span className="font-bold tracking-wide">
+              {fingerprint.physical_emitter_id}
+            </span>
+            <span>CFO {fingerprint.cfo_ppm.toFixed(2)} ppm</span>
+            <span>Rise {fingerprint.rise_time_us.toFixed(1)} µs</span>
+            {fingerprint.clone_alert && (
+              <span className="rounded bg-red-700/80 px-1.5 py-0.5 font-bold uppercase text-white">
+                CLONE ALERT
+              </span>
+            )}
+          </div>
+        )}
         {result && (
           <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-slate-400">
             <span className="rounded border border-slate-700 px-1.5 py-0.5 font-mono text-slate-300">

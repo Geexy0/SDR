@@ -126,7 +126,7 @@ class ReplayRequest(RfBase):
     tx_vga: int
     loop: bool = False
     max_duration_sec: float | None = None
-    # PP-LAB-RF-2026: TX amp hard-off (RX CaptureRequest may still use amp 0|1).
+    # TX amp hard-off (RX CaptureRequest may still use amp 0|1).
     amp: Literal[0] = 0
 
     @field_validator("tx_vga")
@@ -244,6 +244,7 @@ class TelemetryEvent(BaseModel):
         "error",
         "heartbeat",
         "mission",
+        "geohunt_update",
     ]
     ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     state: HardwareState | None = None

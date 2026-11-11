@@ -138,6 +138,35 @@ class LookAngleRequest(BaseModel):
     frequency_hz: float = Field(..., ge=1e6, le=6e9)
 
 
+class GeoHuntIngestRequest(BaseModel):
+    lat: float = Field(..., ge=-90, le=90)
+    lon: float = Field(..., ge=-180, le=180)
+    rssi_db: float = Field(..., ge=-150, le=50)
+    freq_hz: int = Field(433_920_000, ge=1_000_000, le=6_000_000_000)
+    emitter_id: str = Field(default="PHY-UNKNOWN", min_length=1, max_length=64)
+    timestamp: float | None = Field(default=None, ge=0)
+
+
+class GeoHuntBearingRequest(BaseModel):
+    lat: float = Field(..., ge=-90, le=90)
+    lon: float = Field(..., ge=-180, le=180)
+    bearing_deg: float = Field(..., ge=0, lt=360)
+    emitter_id: str = Field(default="LOB", min_length=1, max_length=64)
+    freq_hz: int = Field(default=0, ge=0, le=6_000_000_000)
+    rssi_db: float | None = Field(default=None, ge=-150, le=50)
+    angular_std_deg: float = Field(default=3.0, ge=0.1, le=45.0)
+
+
+class DopplerSampleBody(BaseModel):
+    timestamp: float
+    measured_cfo_hz: float
+
+
+class DopplerFitRequest(BaseModel):
+    samples: list[DopplerSampleBody] = Field(..., min_length=4, max_length=512)
+    nominal_freq_hz: float = Field(..., ge=1e6, le=6e9)
+
+
 class RadiosondeInjectRequest(BaseModel):
     serial_id: str = Field(..., min_length=1, max_length=16)
     lat: float = Field(..., ge=-90, le=90)

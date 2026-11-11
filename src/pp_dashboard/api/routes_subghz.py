@@ -6,13 +6,14 @@ import logging
 from collections.abc import Awaitable
 from typing import TypeVar
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from pp_dashboard.models.rf import HardwareStatusResponse
 from pp_dashboard.models.subghz import (
     AnalyzeRequest,
     BruteforceRequest,
     BruteforceStopResponse,
+    FingerprintAnalyzeRequest,
     PacketListResponse,
     ReplayPacketRequest,
     SniffRequest,
@@ -21,6 +22,10 @@ from pp_dashboard.models.subghz import (
 )
 from pp_dashboard.security.tx_gate import TxGateError, assert_tx_allowed
 from pp_dashboard.subghz.engine import SubGhzEngine, get_subghz_engine
+from pp_dashboard.subghz.rf_fingerprint import (
+    analyze_and_cluster,
+    default_emitter_store,
+)
 from pp_dashboard.subghz.workbench import demodulate_file, result_to_dict
 
 log = logging.getLogger(__name__)
@@ -115,6 +120,33 @@ async def sub_file(
     body: SubConvertRequest, engine: SubGhzEngine = Depends(engine_dep)
 ) -> dict:
     return await _run(engine.convert_sub(body))
+
+
+@router.post("/fingerprint/analyze")
+async def fingerprint_analyze(body: FingerprintAnalyzeRequest) -> dict:
+    """Extract RF hardware fingerprint and cluster / spoof-check against SQLite."""
+    import asyncio
+
+    def _run_fp() -> dict:
+        store = default_emitter_store()
+        return analyze_and_cluster(
+            store,
+            body.filepath,
+            sample_rate=body.sample_rate,
+            nominal_freq_hz=float(body.nominal_freq_hz),
+            digital_device_id=body.digital_device_id,
+            bits_hex=body.bits_hex,
+        )
+
+    return await _run(asyncio.to_thread(_run_fp))
+
+
+@router.get("/fingerprint/emitters")
+async def fingerprint_emitters(
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict:
+    store = default_emitter_store()
+    return {"emitters": store.list_all(limit=limit)}
 
 
 async def _run(coro: Awaitable[T]) -> T:

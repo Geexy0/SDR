@@ -110,7 +110,36 @@ def stamp_rf_hit(**kwargs: Any) -> dict[str, Any] | None:
             log.debug("geoloc stamp bootstrap failed", exc_info=True)
             return None
     try:
-        return svc.stamp(**kwargs)
+        stamped = svc.stamp(**kwargs)
     except Exception:
         log.debug("geoloc stamp failed", exc_info=True)
         return None
+    # Forward into live geo-hunt fusion when active (best-effort async schedule).
+    try:
+        from pp_dashboard.geoloc.live_fusion import LiveGeoHuntFusion
+
+        fusion = LiveGeoHuntFusion._instance  # noqa: SLF001
+        if fusion is not None and fusion.running and stamped is not None:
+            import asyncio
+
+            rssi = kwargs.get("rssi_db")
+            freq = kwargs.get("frequency_hz") or 0
+            emitter = kwargs.get("ref_id") or kwargs.get("label") or "RX"
+            if rssi is not None and stamped.get("lat") is not None:
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = None
+                if loop is not None:
+                    loop.create_task(
+                        fusion.ingest_rx_hit(
+                            lat=float(stamped["lat"]),
+                            lon=float(stamped["lon"]),
+                            rssi_db=float(rssi),
+                            freq_hz=int(freq),
+                            emitter_id=str(emitter),
+                        )
+                    )
+    except Exception:
+        log.debug("geo-hunt forward failed", exc_info=True)
+    return stamped

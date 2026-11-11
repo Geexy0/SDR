@@ -71,6 +71,8 @@ EXPECTED_RX_OR_CONTROL_ROUTES: frozenset[str] = frozenset(
         "POST /api/subghz/workbench/demod",
         "POST /api/subghz/bruteforce/stop",
         "POST /api/subghz/sub-file",
+        "POST /api/subghz/fingerprint/analyze",
+        "GET /api/subghz/fingerprint/emitters",
         # TPMS
         "GET /api/tpms/status",
         "POST /api/tpms/listen",
@@ -119,6 +121,12 @@ EXPECTED_RX_OR_CONTROL_ROUTES: frozenset[str] = frozenset(
         "POST /api/geoloc/gnss/l1-analyze",
         "GET /api/geoloc/gnss/samples",
         "POST /api/geoloc/look-angle",
+        "POST /api/geoloc/hunt/start",
+        "POST /api/geoloc/hunt/stop",
+        "GET /api/geoloc/hunt/status",
+        "POST /api/geoloc/hunt/ingest",
+        "POST /api/geoloc/hunt/bearing",
+        "POST /api/geoloc/doppler/fit",
         # WebSockets
         "WS /ws/telemetry",
         "WS /ws/waterfall",

@@ -163,3 +163,23 @@ class BruteforceStopResponse(BaseModel):
     candidate_keys: list[int]
     center_sample: int | None
     note: str
+
+
+class FingerprintAnalyzeRequest(BaseModel):
+    """Physical-layer RF fingerprint extract + cluster / spoof check."""
+
+    filepath: Path
+    sample_rate: int = Field(2_000_000, ge=SAMPLE_RATE_MIN, le=SAMPLE_RATE_MAX)
+    nominal_freq_hz: int = Field(433_920_000, ge=FREQ_MIN_HZ, le=FREQ_MAX_HZ)
+    digital_device_id: str | None = Field(default=None, max_length=64)
+    bits_hex: str | None = Field(default=None, max_length=512)
+
+    @field_validator("filepath")
+    @classmethod
+    def validate_path(cls, value: Path) -> Path:
+        resolved = _ensure_under_captures(value)
+        if not resolved.exists():
+            raise ValueError(f"missing file: {resolved}")
+        if resolved.suffix.lower() not in {".cs8", ".c8"}:
+            raise ValueError("fingerprint expects .cs8/.c8")
+        return resolved

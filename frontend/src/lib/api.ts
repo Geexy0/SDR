@@ -246,6 +246,28 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  fingerprintAnalyze: (body: Record<string, unknown>) =>
+    req<{
+      ok: boolean;
+      physical_emitter_id: string;
+      clone_alert: boolean;
+      alert?: string | null;
+      fingerprint: {
+        cfo_hz: number;
+        cfo_ppm: number;
+        rise_time_us: number;
+        overshoot_db: number;
+        clock_skew_ppm: number;
+        phase_noise_rad_rms: number;
+      };
+    }>("/api/subghz/fingerprint/analyze", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  fingerprintEmitters: (limit = 50) =>
+    req<{ emitters: Record<string, unknown>[] }>(
+      `/api/subghz/fingerprint/emitters?limit=${limit}`,
+    ),
   bruteforce: (body: Record<string, unknown>) =>
     req("/api/subghz/bruteforce", { method: "POST", body: JSON.stringify(body) }),
   bruteforceStop: () =>
@@ -373,6 +395,56 @@ export const api = {
     }),
   gnssL1Analyze: (body: Record<string, unknown> = {}) =>
     req<GnssL1AnalyzeResult>("/api/geoloc/gnss/l1-analyze", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  geoHuntStart: () =>
+    req<{ ok: boolean; running: boolean }>("/api/geoloc/hunt/start", {
+      method: "POST",
+    }),
+  geoHuntStop: () =>
+    req<{ ok: boolean; running: boolean }>("/api/geoloc/hunt/stop", {
+      method: "POST",
+    }),
+  geoHuntStatus: () =>
+    req<{ ok: boolean; running: boolean; emitters: Record<string, unknown> }>(
+      "/api/geoloc/hunt/status",
+    ),
+  geoHuntIngest: (body: {
+    lat: number;
+    lon: number;
+    rssi_db: number;
+    freq_hz?: number;
+    emitter_id?: string;
+    timestamp?: number;
+  }) =>
+    req<Record<string, unknown>>("/api/geoloc/hunt/ingest", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  geoHuntBearing: (body: {
+    lat: number;
+    lon: number;
+    bearing_deg: number;
+    emitter_id?: string;
+    freq_hz?: number;
+    rssi_db?: number;
+    angular_std_deg?: number;
+  }) =>
+    req<Record<string, unknown>>("/api/geoloc/hunt/bearing", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  dopplerFit: (body: {
+    samples: { timestamp: number; measured_cfo_hz: number }[];
+    nominal_freq_hz: number;
+  }) =>
+    req<{
+      ok: boolean;
+      cpa_timestamp: number;
+      velocity_m_s: number;
+      min_range_m: number;
+    }>("/api/geoloc/doppler/fit", {
       method: "POST",
       body: JSON.stringify(body),
     }),

@@ -128,6 +128,10 @@ export function LocationIntelDeck({
   const [rssiResult, setRssiResult] = useState<RssiGridSolveResult | null>(null);
 
   const [huntActive, setHuntActive] = useState(false);
+  const [autoFusion, setAutoFusion] = useState(false);
+  const [fusionNote, setFusionNote] = useState("");
+  const lastTelemetry = useHardwareStore((s) => s.lastTelemetry);
+  const telemetrySeq = useHardwareStore((s) => s.telemetrySeq);
   const [liveRssi, setLiveRssi] = useState(-55);
   const [squelchDb, setSquelchDb] = useState(-90);
   const [ceilingDb, setCeilingDb] = useState(-30);
@@ -213,6 +217,14 @@ export function LocationIntelDeck({
                   ? "Getting Colder"
                   : "Hold",
           });
+          if (autoFusion) {
+            void api.geoHuntIngest({
+              lat: gps.lat,
+              lon: gps.lon,
+              rssi_db,
+              emitter_id: "FOX-HUNT",
+            });
+          }
         } catch {
           /* transient */
         }
@@ -222,7 +234,7 @@ export function LocationIntelDeck({
       navigator.geolocation.clearWatch(watchId);
       window.clearInterval(tick);
     };
-  }, [huntActive, setToast]);
+  }, [huntActive, autoFusion, setToast]);
 
   const toggleGeiger = async () => {
     const g = geigerRef.current;
@@ -253,6 +265,48 @@ export function LocationIntelDeck({
     setToast("Fox-hunt stopped");
   };
 
+  useEffect(() => {
+    if (!autoFusion || !lastTelemetry) return;
+    if (lastTelemetry.type !== "geohunt_update") return;
+    const m = lastTelemetry.metrics ?? {};
+    const pin = m.ml_pin as { lat?: number; lon?: number; emitter_id?: string } | undefined;
+    const c80 = m.contour_80 as [number, number][] | undefined;
+    const c95 = m.contour_95 as [number, number][] | undefined;
+    const cep = m.cep95 as { polygon?: [number, number][] } | undefined;
+    if (pin?.lat != null && pin.lon != null) {
+      onSolverOverlay({
+        mlPin: {
+          lat: pin.lat,
+          lon: pin.lon,
+          label: String(pin.emitter_id ?? m.emitter_id ?? "GEO-HUNT"),
+        },
+        contour80: c80 ?? null,
+        contour95: c95 ?? null,
+        cep95: cep?.polygon ?? null,
+      });
+      setFusionNote(
+        `Live fusion · ${String(pin.emitter_id ?? m.emitter_id ?? "emit")} @ ${pin.lat.toFixed(5)}, ${pin.lon.toFixed(5)}`,
+      );
+    }
+  }, [autoFusion, lastTelemetry, telemetrySeq, onSolverOverlay]);
+
+  const toggleAutoFusion = async () => {
+    try {
+      if (autoFusion) {
+        await api.geoHuntStop();
+        setAutoFusion(false);
+        setFusionNote("");
+        setToast("AUTO GEO-HUNT FUSION: OFF");
+        return;
+      }
+      await api.geoHuntStart();
+      setAutoFusion(true);
+      setToast("AUTO GEO-HUNT FUSION: ON");
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const commitPolarLob = async (peak: {
     bearing_deg: number;
     angular_std_deg: number;
@@ -272,6 +326,16 @@ export function LocationIntelDeck({
         label: `Polar peak ${peak.bearing_deg.toFixed(0)}°`,
         length_m: 15000,
       });
+      if (autoFusion) {
+        await api.geoHuntBearing({
+          lat: op.lat,
+          lon: op.lon,
+          bearing_deg: peak.bearing_deg,
+          angular_std_deg: peak.angular_std_deg,
+          rssi_db: peak.peak_rssi_db,
+          emitter_id: "POLAR-LOB",
+        });
+      }
       setToast(
         `Committed LOB ${peak.bearing_deg.toFixed(0)}° (σ≈${peak.angular_std_deg.toFixed(1)}°) — Solve LOBs next`,
       );
@@ -460,8 +524,22 @@ export function LocationIntelDeck({
             >
               Geiger {geigerOn ? "ON" : "off"}
             </button>
+            <button
+              type="button"
+              className={`rounded border px-2 py-0.5 font-semibold tracking-wide ${
+                autoFusion
+                  ? "border-cyan-500 bg-cyan-950/50 text-cyan-200"
+                  : "border-slate-600 text-slate-400"
+              }`}
+              onClick={() => void toggleAutoFusion()}
+            >
+              AUTO GEO-HUNT FUSION: {autoFusion ? "ON" : "OFF"}
+            </button>
           </div>
         </div>
+        {fusionNote && (
+          <p className="mb-1 text-[9px] text-cyan-300/90">{fusionNote}</p>
+        )}
         <div className="mb-1 flex flex-wrap gap-2 text-[9px] text-slate-500">
           <label className="flex items-center gap-1">
             sq
