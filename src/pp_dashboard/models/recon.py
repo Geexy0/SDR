@@ -103,7 +103,7 @@ class SynthesizeRequest(BaseModel):
     # fm
     fm_frequency_hz: int = Field(100_000_000, ge=FREQ_MIN_HZ, le=FREQ_MAX_HZ)
     ps: str = "LAB-FM"
-    rt: str = "PP-LAB-RF-2026"
+    rt: str = "LAB-FM-RDS"
     audio_hz: float = 440.0
 
     @field_validator("tx_vga")

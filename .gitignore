@@ -12,6 +12,12 @@ build/
 .venv/
 venv/
 .DS_Store
+.coverage
+.coverage.*
+coverage.json
+htmlcov/
+.tox/
+.nox/
 
 # Runtime captures / IQ / audio / DBs
 captures/
@@ -39,8 +45,16 @@ firmware-cache/
 *.egg-info/
 src/*.egg-info/
 
+# TX engagement docs (templates are SCOPE.example.md / CONFIRM.example.md)
+SCOPE.md
+CONFIRM.md
+.local/
+
 # Editor / agent local
 .cursor/
 .idea/
 *.swp
 *~
+.env
+.env.*
+!.env.example

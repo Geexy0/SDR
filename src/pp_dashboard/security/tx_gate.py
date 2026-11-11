@@ -118,9 +118,9 @@ def assert_tx_allowed(
                 f"TX denied: target {target_id!r} outside allow-list T1–T7"
             )
 
-    # PP-LAB-RF-2026: AMP off hard rule unless SCOPE amends (currently forbids AMP on).
+    # AMP off hard rule unless SCOPE amends (default forbids AMP on).
     if int(amp) != 0:
-        raise TxGateError("TX denied: AMP must be off (-a 0) under PP-LAB-RF-2026")
+        raise TxGateError("TX denied: AMP must be off (-a 0) under active SCOPE")
 
     if require_loop_ok:
         if max_duration_sec is None or float(max_duration_sec) <= 0:
@@ -136,7 +136,7 @@ def assert_tx_allowed(
 def force_amp_off(amp: int) -> int:
     """Policy helper — always return 0 for lab TX; reject non-zero."""
     if int(amp) != 0:
-        raise TxGateError("TX denied: AMP must be off (-a 0) under PP-LAB-RF-2026")
+        raise TxGateError("TX denied: AMP must be off (-a 0) under active SCOPE")
     return 0
 
 

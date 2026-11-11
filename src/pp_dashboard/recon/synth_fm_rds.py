@@ -41,7 +41,7 @@ def synthesize_fm_rds(
     *,
     audio_hz: float = 440.0,
     ps: str = "LAB-FM",
-    rt: str = "PP-LAB-RF-2026",
+    rt: str = "LAB-FM-RDS",
     sample_rate: int = 2_000_000,
     duration_s: float = 2.0,
     deviation_hz: float = 75_000.0,

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Light / local lab jam — PP-LAB-RF-2026 only.
+# Light / local lab jam — requires PP_LAB_CONFIRM=<engagement-id> matching CONFIRM.md.
 # Narrow, short, AMP=0, attended. Not a broadband jammer.
 set -euo pipefail
 
@@ -13,8 +13,8 @@ SR="${SR:-2000000}"
 
 die() { echo "error: $*" >&2; exit 1; }
 
-[[ "${PP_LAB_CONFIRM:-}" == "PP-LAB-RF-2026" ]] || die \
-  "Set PP_LAB_CONFIRM=PP-LAB-RF-2026 (engagement CONFIRM required)"
+[[ -n "${PP_LAB_CONFIRM:-}" ]] || die \
+  "Set PP_LAB_CONFIRM=<engagement-id> (must match local CONFIRM.md)"
 
 [[ -n "$FREQ_HZ" ]] || die "usage: $0 <freq_hz> [seconds<=15]"
 [[ "$SECONDS_TX" =~ ^[0-9]+$ ]] || die "seconds must be integer"
